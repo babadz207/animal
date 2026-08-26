@@ -469,15 +469,23 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- ☕ TỰ ĐỘNG UỐNG CÀ PHÊ DUY TRÌ SANITY 100%
-            local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
-            if coffeeRemote then coffeeRemote:FireServer("Coffee") end
+            -- ☕ TỰ ĐỘNG UỐNG CÀ PHÊ DUY TRÌ SANITY & TỈNH TÁO 100% (AUTO DRINK COFFEE FOR 100% SANITY)
+            pcall(function()
+                local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+                if coffeeRemote then
+                    coffeeRemote:FireServer("Coffee")
+                    coffeeRemote:FireServer("CoffeeMachine")
+                end
 
-            local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
-            local coffeePrompt = coffeeModel and coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if coffeePrompt and coffeePrompt.Enabled then
-                if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
-            end
+                local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
+                if coffeeModel then
+                    local coffeePrompt = coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if coffeePrompt and coffeePrompt.Enabled then
+                        Stats.CurrentStatus = "☕ Uống Cà Phê duy trì Trí Lực Sanity 100% Tỉnh Táo..."
+                        if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
+                    end
+                end
+            end)
 
             -- 👾 TỰ ĐỘNG THOÁT KHỎI QUÁI VẬT BẮT / GIẪY GIỤA THOÁT CẦU (AUTO ESCAPE MONSTER GRAB)
             local touchRemote = Net:FindFirstChild("RE/Touch")
