@@ -469,19 +469,29 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- ☕ TỰ ĐỘNG UỐNG CÀ PHÊ DUY TRÌ SANITY & TỈNH TÁO 100% (AUTO DRINK COFFEE FOR 100% SANITY)
+            -- ☕ TỰ ĐỘNG CHỜ PHA & UỐNG CÀ PHÊ KHI "READY" (SMART BREWING COOLDOWN ENGINE)
             pcall(function()
-                local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
-                if coffeeRemote then
-                    coffeeRemote:FireServer("Coffee")
-                    coffeeRemote:FireServer("CoffeeMachine")
-                end
-
                 local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
                 if coffeeModel then
+                    local coffeeStatusText = ""
+                    for _, desc in pairs(coffeeModel:GetDescendants()) do
+                        if desc:IsA("TextLabel") and desc.Text then
+                            coffeeStatusText = string.lower(desc.Text)
+                            break
+                        end
+                    end
+
+                    -- Kiểm tra xem Cà Phê đã sẵn sàng (ready) hay đang pha (brewing 30s)
+                    local isReady = string.find(coffeeStatusText, "ready") ~= nil or coffeeStatusText == ""
                     local coffeePrompt = coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if coffeePrompt and coffeePrompt.Enabled then
-                        Stats.CurrentStatus = "☕ Uống Cà Phê duy trì Trí Lực Sanity 100% Tỉnh Táo..."
+
+                    if isReady and coffeePrompt and coffeePrompt.Enabled then
+                        Stats.CurrentStatus = "☕ Cà Phê đã Ready! Đang uống Cà Phê duy trì Sanity 100%..."
+                        local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+                        if coffeeRemote then
+                            coffeeRemote:FireServer("Coffee")
+                            coffeeRemote:FireServer("CoffeeMachine")
+                        end
                         if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
                     end
                 end
