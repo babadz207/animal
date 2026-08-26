@@ -163,30 +163,45 @@ task.spawn(function()
     end
 end)
 
--- 🏠 1. TELEPORT CHÍNH XÁC VÀO TRUNG TÂM TOUCH PART ROOM1/ROOM2/ROOM3 VÀ BẤM START NOW
+-- 🏠 1. CHỈ VÀO Ô TRỐNG (0 NGƯỜI) - NẾU CÓ NGƯỜI THÌ ĐỨNG BÊN NGOÀI CHỜ
 local function handleLobby()
     if game.PlaceId ~= 104522435597696 then
         pcall(function()
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then return end
 
             local roomsFolder = workspace:FindFirstChild("Rooms")
-            local touchPart = nil
+            local emptyTouchPart = nil
 
             if roomsFolder then
                 for _, room in pairs(roomsFolder:GetChildren()) do
                     local t = room:FindFirstChild("Touch")
                     if t and t:IsA("BasePart") then
-                        touchPart = t
-                        break
+                        -- Kiểm tra xem có người chơi khác đứng gần ô này không (bán kính 12 studs)
+                        local isOccupied = false
+                        for _, p in pairs(Players:GetPlayers()) do
+                            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                                local dist = (p.Character.HumanoidRootPart.Position - t.Position).Magnitude
+                                if dist <= 12 then
+                                    isOccupied = true
+                                    break
+                                end
+                            end
+                        end
+
+                        if not isOccupied then
+                            emptyTouchPart = t
+                            break
+                        end
                     end
                 end
             end
 
-            -- Teleport thẳng vào giữa Ô Vuông Xanh
-            if root and touchPart then
-                Stats.CurrentStatus = "⚡ Đã Teleport vào Ô Vuông Xanh (Rooms.Touch)..."
-                root.CFrame = touchPart.CFrame * CFrame.new(0, 3, 0)
+            -- Nếu tìm được ô hoàn toàn trống
+            if emptyTouchPart then
+                Stats.CurrentStatus = "⚡ Đã tìm thấy ô trống - Teleport vào xếp hàng..."
+                root.CFrame = emptyTouchPart.CFrame * CFrame.new(0, 3, 0)
                 task.wait(0.3)
 
                 -- Kích hoạt START NOW
@@ -194,6 +209,13 @@ local function handleLobby()
                 if quickStart then
                     Stats.CurrentStatus = "🚀 Bấm START NOW vào trận ngay!"
                     quickStart:FireServer()
+                end
+            else
+                -- Nếu tất cả các ô đều có người: Đứng bên ngoài sân chờ ô trống
+                Stats.CurrentStatus = "⏳ Tất cả các ô đều có người! Đang đứng ngoài chờ ô trống..."
+                local waitSpot = CFrame.new(-91.3, 22.5, -15.0) -- Vị trí đứng chờ ngoài sân
+                if (root.Position - waitSpot.Position).Magnitude > 15 then
+                    root.CFrame = waitSpot
                 end
             end
         end)
