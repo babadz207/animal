@@ -502,14 +502,27 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- 🛡️ TỰ ĐỘNG BẮN TASER/SCANNER DIỆT QUÁI BẮT (HỒI +2 SANITY)
-            local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
-            local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
+            -- 👹 TỰ ĐỘNG TỰ CỨU & TRIỆT HẠ KHI BỆNH NHÂN BIẾN THÀNH QUÁI VẬT (AUTO SELF-RESCUE)
             local taserRemote = Net:FindFirstChild("RE/TaserFired")
+            local scannerRemote = Net:FindFirstChild("RE/ScannerKillGhost")
+            local shootRemote = Net:FindFirstChild("RE/PlayShootEffect") or Net:FindFirstChild("RE/ShootEffect")
+            local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
+            local extHitRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHit")
 
-            if ghostRemote then ghostRemote:FireServer() end
-            if extRemote then extRemote:FireServer() end
             if taserRemote then taserRemote:FireServer() end
+            if scannerRemote then scannerRemote:FireServer() end
+            if shootRemote then shootRemote:FireServer() end
+            if extRemote then extRemote:FireServer() end
+            if extHitRemote then extHitRemote:FireServer() end
+
+            -- 🆘 TỰ ĐỘNG TỰ CỨU / HỒI SINH BẢN THÂN (TRY SELF REVIVE)
+            local selfReviveRemote = Net:FindFirstChild("RF/TrySelfRevive")
+            local reviveAllRemote = Net:FindFirstChild("RF/TryReviveAll")
+            local playerRevived = Net:FindFirstChild("RE/PlayerRevived")
+
+            if selfReviveRemote then pcall(function() selfReviveRemote:InvokeServer() end) end
+            if reviveAllRemote then pcall(function() reviveAllRemote:InvokeServer() end) end
+            if playerRevived then playerRevived:FireServer() end
 
             local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
             if playAgain then playAgain:FireServer(true) end
