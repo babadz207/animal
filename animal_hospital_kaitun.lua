@@ -368,9 +368,46 @@ local function handleMatchGameplay()
 
             -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
             elseif activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
-                -- BƯỚC A: Phân tích mẫu bệnh tại Analyzer
+                -- 🔬 ĐẶC BIỆT ROOM 1: XÁC NHẬN XÉT NGHIỆM DNA BỆNH NHÂN
+                local r1 = workspace:FindFirstChild("Rooms") and workspace.Rooms:FindFirstChild("Room1", true)
+                if r1 then
+                    local minigame = r1:FindFirstChild("Minigame", true)
+                    if minigame then
+                        local analyzer = minigame:FindFirstChild("Analyzer")
+                        local monitor = minigame:FindFirstChild("Monitor")
+
+                        -- 🧪 1. Xét nghiệm mẫu DNA tại Room 1 Analyzer
+                        if analyzer then
+                            local p = analyzer:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if p and p.Enabled then
+                                Stats.CurrentStatus = "🔬 ROOM 1: Đang xét nghiệm mẫu DNA Bệnh Nhân..."
+                                local pos = analyzer:IsA("BasePart") and analyzer.CFrame or analyzer:GetPivot()
+                                root.CFrame = pos * CFrame.new(0, 3, 0)
+                                task.wait(0.2)
+                                if fireproximityprompt then fireproximityprompt(p, 0) end
+                                task.wait(0.3)
+                            end
+                        end
+
+                        -- 💻 2. Xác nhận và Kiểm tra kết quả DNA tại Room 1 Monitor
+                        if monitor then
+                            for _, p in pairs(monitor:GetChildren()) do
+                                if p:IsA("ProximityPrompt") and p.Enabled then
+                                    Stats.CurrentStatus = "💻 ROOM 1: Đang xác nhận kết quả xét nghiệm DNA..."
+                                    local pos = monitor:IsA("BasePart") and monitor.CFrame or monitor:GetPivot()
+                                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                                    task.wait(0.2)
+                                    if fireproximityprompt then fireproximityprompt(p, 0) end
+                                    task.wait(0.3)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- BƯỚC A: Phân tích mẫu bệnh tại Analyzer các phòng khác
                 if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
-                    Stats.CurrentStatus = "🔬 2. Phân tích mẫu bệnh nhân tại Analyzer..."
+                    Stats.CurrentStatus = "🔬 Phân tích mẫu bệnh nhân tại Analyzer..."
                     local pos = activeAnalyzerPrompt.Parent:IsA("BasePart") and activeAnalyzerPrompt.Parent.CFrame or activeAnalyzerPrompt.Parent:GetPivot()
                     root.CFrame = pos * CFrame.new(0, 3, 0)
                     task.wait(0.3)
@@ -380,7 +417,7 @@ local function handleMatchGameplay()
 
                 -- BƯỚC B: Xử lý kết quả tại Monitor
                 if activeMonitorPrompt and activeMonitorPrompt.Parent then
-                    Stats.CurrentStatus = "💻 3. Xử lý kết quả khám bệnh tại Monitor..."
+                    Stats.CurrentStatus = "💻 Xử lý kết quả khám bệnh tại Monitor..."
                     local pos = activeMonitorPrompt.Parent:IsA("BasePart") and activeMonitorPrompt.Parent.CFrame or activeMonitorPrompt.Parent:GetPivot()
                     root.CFrame = pos * CFrame.new(0, 3, 0)
                     task.wait(0.3)
@@ -390,7 +427,7 @@ local function handleMatchGameplay()
 
                 -- BƯỚC C: Chữa bệnh tại Giường
                 if activeBedPrompt and activeBedPrompt.Parent then
-                    Stats.CurrentStatus = "🩺 4. Teleport tới Giường phẫu thuật/chữa bệnh..."
+                    Stats.CurrentStatus = "🩺 Teleport tới Giường phẫu thuật/chữa bệnh..."
                     local pos = activeBedPrompt.Parent:IsA("BasePart") and activeBedPrompt.Parent.CFrame or activeBedPrompt.Parent:GetPivot()
                     root.CFrame = pos * CFrame.new(0, 3, 0)
                     task.wait(0.3)
