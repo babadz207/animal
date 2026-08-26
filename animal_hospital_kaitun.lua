@@ -293,7 +293,7 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- 📌 TRƯỜNG HỢP 1: BỆNH NHÂN TỚI CỬA SỔ -> CHỤP ẢNH (TAKE PHOTO) & ĐÓNG DẤU (STAMP FORMS)
+            -- 📌 TRƯỜNG HỢP 1: BỆNH NHÂN TỚI CỬA SỔ -> QUY TRÌNH KIỂM TRA ẢNH & CHECK-IN ĐẦY ĐỦ
             if activeCameraPrompt or activeFormPrompt then
                 -- BƯỚC A: Chụp Ảnh Bệnh Nhân (Take Photo)
                 if activeCameraPrompt and activeCameraPrompt.Parent then
@@ -306,9 +306,51 @@ local function handleMatchGameplay()
                     task.wait(0.3)
                 end
 
-                -- BƯỚC B: Đóng Dấu Hồ Sơ (Stamp Forms)
+                -- BƯỚC B: TỰ ĐỘNG LẬT ẢNH & KIỂM TRA ẢNH BỆNH NHÂN (REVEAL PHOTO & INSPECT)
+                Stats.CurrentStatus = "🖼️ 2. Đang lật & Kiểm tra Ảnh Bệnh Nhân..."
+                local revealRemote = Net:FindFirstChild("RE/RevealPhoto")
+                local inspectRemote = Net:FindFirstChild("RE/InspectChanged")
+                if revealRemote then revealRemote:FireServer() end
+                if inspectRemote then inspectRemote:FireServer(true) end
+                task.wait(0.3)
+
+                -- BƯỚC C: ĐĂNG KÝ MÁY TÍNH & IN THẺ BỆNH NHÂN (REGISTER & PRINT BADGE)
+                if checkInFolder then
+                    local compModel = checkInFolder:FindFirstChild("Computer")
+                    local printModel = checkInFolder:FindFirstChild("Printer")
+                    local badgeModel = checkInFolder:FindFirstChild("PatientBadgeBase")
+
+                    if compModel then
+                        local p = compModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if p and p.Enabled then
+                            root.CFrame = compModel:GetPivot() * CFrame.new(0, 3, 0)
+                            task.wait(0.15)
+                            if fireproximityprompt then fireproximityprompt(p, 0) end
+                        end
+                    end
+
+                    if printModel then
+                        local p = printModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if p and p.Enabled then
+                            root.CFrame = printModel:GetPivot() * CFrame.new(0, 3, 0)
+                            task.wait(0.15)
+                            if fireproximityprompt then fireproximityprompt(p, 0) end
+                        end
+                    end
+
+                    if badgeModel then
+                        local p = badgeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if p and p.Enabled then
+                            root.CFrame = badgeModel:GetPivot() * CFrame.new(0, 3, 0)
+                            task.wait(0.15)
+                            if fireproximityprompt then fireproximityprompt(p, 0) end
+                        end
+                    end
+                end
+
+                -- BƯỚC D: Đóng Dấu Hồ Sơ (Stamp Forms)
                 if activeFormPrompt and activeFormPrompt.Parent then
-                    Stats.CurrentStatus = "📋 2. Đang bấm Đóng Dấu Hồ Sơ (Stamp Forms)..."
+                    Stats.CurrentStatus = "📋 4. Đang bấm Đóng Dấu Hồ Sơ (Stamp Forms)..."
                     local p = activeFormPrompt.Parent
                     local pos = p:IsA("BasePart") and p.CFrame or p:GetPivot()
                     root.CFrame = pos * CFrame.new(0, 3, 0)
@@ -317,7 +359,7 @@ local function handleMatchGameplay()
                     task.wait(0.3)
                 end
 
-                -- BƯỚC C: Chấp nhận Bệnh nhân
+                -- BƯỚC E: Chấp nhận Bệnh nhân
                 local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
                 if dialogRemote then dialogRemote:FireServer(true) end
 
