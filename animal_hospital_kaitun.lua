@@ -345,7 +345,11 @@ local function handleMatchGameplay()
                 task.wait(0.4)
             end
 
-            -- 🛡️ MẸO SINH TỒN 1: TỰ ĐỘNG GIẢI MINIGAME OXY & NHỊP TIM
+            -- ☕ MẸO GAMEPLAY: TỰ ĐỘNG UỐNG CÀ PHÊ HỒI PHỤC SANITY VỀ 100%
+            local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+            if coffeeRemote then coffeeRemote:FireServer("Coffee") end
+
+            -- 🛡️ MẸO GAMEPLAY: TỰ ĐỘNG GIẢI MINIGAME OXY & NHỊP TIM
             Stats.CurrentStatus = "Đang tự giải Minigame Oxy & Nhịp Tim..."
             local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
             local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
