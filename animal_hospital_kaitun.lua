@@ -366,9 +366,8 @@ local function handleMatchGameplay()
                 Stats.CurrentStatus = "⏳ Đang chờ Bệnh Nhân đi vào Phòng Bệnh..."
                 task.wait(1.5)
 
-            -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
+            -- 📌 TRƯỜNG HỢP 2: BỆNH NHÂN CẦN KHÁM & CHỮA TRỊ IN-ROOM (4 BƯỚC THỜI GIAN THỰC)
             elseif activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
-                -- 🔬 QUY TRÌNH MÁY BÊN TRÁI (ANALYZER) ➔ MÁY BÊN PHẢI (MONITOR) ➔ GIƯỜNG BỆNH
                 pcall(function()
                     local medicalFolder = workspace.Rooms:FindFirstChild("Medical") or workspace.Rooms:FindFirstChild("Emergency")
                     if medicalFolder then
@@ -378,12 +377,13 @@ local function handleMatchGameplay()
                                 local analyzer = minigame:FindFirstChild("Analyzer")
                                 local monitor = minigame:FindFirstChild("Monitor")
                                 local bed = minigame:FindFirstChild("Bed") and minigame.Bed:FindFirstChild("InBed")
+                                local medicineFolderInRoom = minigame:FindFirstChild("Medicine") or workspace.Rooms:FindFirstChild("Medicine", true)
 
-                                -- 1. BƯỚC A: TELEPORT MÁY BÊN TRÁI (ANALYZER) - XÉT NGHIỆM MẪU
+                                -- 1. BƯỚC A: TELEPORT MÁY BÊN TRÁI (ANALYZER) -> XÉT NGHIỆM MẪU DNA
                                 if analyzer then
                                     local p = analyzer:FindFirstChildWhichIsA("ProximityPrompt", true)
                                     if p and p.Enabled then
-                                        Stats.CurrentStatus = "🔬 1. Teleport tới Máy Bên Trái (Analyzer) - Xét nghiệm mẫu..."
+                                        Stats.CurrentStatus = "🔬 1. Teleport Máy Bên Trái (Analyzer) - Phân tích mẫu..."
                                         root.CFrame = analyzer:GetPivot() * CFrame.new(0, 3, 0)
                                         task.wait(0.2)
                                         if fireproximityprompt then fireproximityprompt(p, 0) end
@@ -391,11 +391,11 @@ local function handleMatchGameplay()
                                     end
                                 end
 
-                                -- 2. BƯỚC B: TELEPORT MÁY BÊN PHẢI (MONITOR) - XỬ LÝ KẾT QUẢ
+                                -- 2. BƯỚC B: TELEPORT MÁY BÊN PHẢI (MONITOR) -> XỬ LÝ KẾT QUẢ & XÁC ĐỊNH BỆNH
                                 if monitor then
                                     for _, p in pairs(monitor:GetChildren()) do
                                         if p:IsA("ProximityPrompt") and p.Enabled then
-                                            Stats.CurrentStatus = "💻 2. Teleport tới Máy Bên Phải (Monitor) - Xử lý kết quả..."
+                                            Stats.CurrentStatus = "💻 2. Teleport Máy Bên Phải (Monitor) - Xác định bệnh nhân bị gì..."
                                             root.CFrame = monitor:GetPivot() * CFrame.new(0, 3, 0)
                                             task.wait(0.2)
                                             if fireproximityprompt then fireproximityprompt(p, 0) end
@@ -404,11 +404,30 @@ local function handleMatchGameplay()
                                     end
                                 end
 
-                                -- 3. BƯỚC C: TELEPORT GIƯỜNG BỆNH - CHỮA TRỊ (APPLY TREATMENT)
+                                -- 3. BƯỚC C: TELEPORT TỚI KỆ THUỐC -> LẤY ĐÚNG DỤNG CỤ Y TẾ ĐIỀU TRỊ
+                                local bp = LocalPlayer:FindFirstChild("Backpack")
+                                local toolCount = (bp and #bp:GetChildren() or 0) + (char and #char:GetChildren() or 0)
+                                
+                                if toolCount < 3 and medicineFolderInRoom then
+                                    for _, medModel in pairs(medicineFolderInRoom:GetChildren()) do
+                                        local medPrompt = medModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                        if medPrompt and medPrompt.Enabled then
+                                            Stats.CurrentStatus = "💊 3. Teleport tới Kệ Thuốc (" .. medModel.Name .. ") - Lấy dụng cụ y tế..."
+                                            local pos = medModel:IsA("BasePart") and medModel.CFrame or medModel:GetPivot()
+                                            root.CFrame = pos * CFrame.new(0, 3, 0)
+                                            task.wait(0.2)
+                                            if fireproximityprompt then fireproximityprompt(medPrompt, 0) end
+                                            task.wait(0.3)
+                                            break
+                                        end
+                                    end
+                                end
+
+                                -- 4. BƯỚC D: TELEPORT GIƯỜNG BỆNH -> PHẪU THUẬT & CHỮA TRỊ (APPLY TREATMENT)
                                 if bed then
                                     local p = bed:FindFirstChildWhichIsA("ProximityPrompt", true)
                                     if p and p.Enabled then
-                                        Stats.CurrentStatus = "🩺 3. Teleport tới Giường Bệnh - Tiến hành chữa trị..."
+                                        Stats.CurrentStatus = "🩺 4. Teleport tới Giường Bệnh - Chữa trị bệnh nhân..."
                                         root.CFrame = bed:IsA("BasePart") and bed.CFrame or bed:GetPivot() * CFrame.new(0, 3, 0)
                                         task.wait(0.2)
                                         if fireproximityprompt then
