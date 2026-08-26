@@ -254,33 +254,40 @@ ClaimBtn.MouseButton1Click:Connect(function()
     ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
 end)
 
--- 🏥 3. TELEPORT TRỰC TIẾP CHỮA BỆNH IN-MATCH (KHÔNG SPAM CHỮ YOU CAN'T CARRY MORE MEDICINE)
+-- 🏥 3. TELEPORT TRỰC TIẾP CHỮA BỆNH IN-MATCH (KHÔNG BAO GIỜ SPAM LỖI NHẶT THUỐC)
 local function handleMatchGameplay()
     if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
         Stats.CurrentStatus = "⚡ Teleport chữa bệnh & lấy dụng cụ y tế..."
         pcall(function()
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            local bp = LocalPlayer:FindFirstChild("Backpack")
 
-            -- Đếm số lượng dụng cụ y tế đang cầm
-            local heldToolsCount = 0
-            if backpack then heldToolsCount = heldToolsCount + #backpack:GetChildren() end
+            -- Đếm chính xác số lượng Tool/Dụng cụ y tế đang cầm
+            local toolCount = 0
+            if bp then
+                for _, item in pairs(bp:GetChildren()) do
+                    if item:IsA("Tool") then toolCount = toolCount + 1 end
+                end
+            end
             if char then
-                for _, v in pairs(char:GetChildren()) do
-                    if v:IsA("Tool") then heldToolsCount = heldToolsCount + 1 end
+                for _, item in pairs(char:GetChildren()) do
+                    if item:IsA("Tool") then toolCount = toolCount + 1 end
                 end
             end
 
             for _, descendant in pairs(workspace:GetDescendants()) do
                 if descendant:IsA("ProximityPrompt") and descendant.Enabled then
-                    local actionText = string.lower(descendant.ActionText or "")
+                    local actText = string.lower(descendant.ActionText or "")
+                    local parentPath = string.lower(descendant.Parent and descendant.Parent:GetFullName() or "")
 
-                    -- Nếu túi đồ đã đầy (>= 3), bỏ qua các ô nhặt thuốc
-                    local isMedicinePickup = string.find(actionText, "drops") or string.find(actionText, "bandage") or string.find(actionText, "medkit") or string.find(actionText, "scalpel") or string.find(actionText, "organ") or string.find(actionText, "antibiotic") or string.find(actionText, "scissors") or string.find(actionText, "transplant") or string.find(actionText, "medicine")
-                    
-                    if heldToolsCount >= 3 and isMedicinePickup then
-                        -- Túi đầy -> Bỏ qua nhặt thuốc
+                    -- Kiểm tra xem Prompt này là Nút Nhặt Thuốc hay Nút Chữa Bệnh
+                    local isMedicinePickup = string.find(parentPath, "medicine") or string.find(actText, "drops") or string.find(actText, "bandage") or string.find(actText, "medkit") or string.find(actText, "scalpel") or string.find(actText, "organ") or string.find(actText, "antibiotic") or string.find(actText, "scissors") or string.find(actText, "transplant")
+                    local isTreatmentAction = string.find(actText, "apply") or string.find(actText, "analyze") or string.find(actText, "process") or string.find(actText, "inspect") or string.find(actText, "print")
+
+                    -- CHỈ nhặt thuốc khi túi đồ ít hơn 2 món. Nếu túi đã có từ 2 món trở lên -> CHỈ tập trung chữa bệnh!
+                    if isMedicinePickup and toolCount >= 2 then
+                        -- Bỏ qua nút nhặt thuốc để tránh spam "you can't carry any more medicine"
                     else
                         local parentPart = descendant.Parent
                         if parentPart and root then
@@ -296,7 +303,9 @@ local function handleMatchGameplay()
                                 task.wait(0.02)
                                 if fireproximityprompt then
                                     fireproximityprompt(descendant, 0)
-                                    Stats.PatientsHealed = Stats.PatientsHealed + 1
+                                    if isTreatmentAction then
+                                        Stats.PatientsHealed = Stats.PatientsHealed + 1
+                                    end
                                 end
                             end
                         end
