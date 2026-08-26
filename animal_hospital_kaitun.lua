@@ -293,6 +293,25 @@ local function handleMatchGameplay()
                 end
             end
 
+            -- 🔧 BƯỚC THỦ THUẬT: KHÔI PHỤC & TỰ ĐỘNG SỬA MÁY ẢNH NẾU BỊ HỎNG (AUTO REPAIR CAMERA)
+            if checkInFolder then
+                local cam = checkInFolder:FindFirstChild("Camera")
+                if cam then
+                    for _, p in pairs(cam:GetDescendants()) do
+                        if p:IsA("ProximityPrompt") and p.Enabled then
+                            local act = string.lower(p.ActionText or "")
+                            if string.find(act, "fix") or string.find(act, "repair") or string.find(act, "sửa") then
+                                Stats.CurrentStatus = "🔧 Máy Ảnh bị hỏng! Đang tự động sửa Máy Ảnh..."
+                                root.CFrame = cam:GetPivot() * CFrame.new(0, 3, 0)
+                                task.wait(0.2)
+                                if fireproximityprompt then fireproximityprompt(p, 0) end
+                                task.wait(0.4)
+                            end
+                        end
+                    end
+                end
+            end
+
             -- 📌 TRƯỜNG HỢP 1: BỆNH NHÂN TỚI CỬA SỔ -> QUY TRÌNH KIỂM TRA ẢNH & CHECK-IN ĐẦY ĐỦ
             if activeCameraPrompt or activeFormPrompt then
                 -- BƯỚC A: Chụp Ảnh Bệnh Nhân (Take Photo)
