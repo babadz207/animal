@@ -345,7 +345,8 @@ local function handleMatchGameplay()
                 task.wait(0.4)
             end
 
-            -- TỰ ĐỘNG GIẢI MINIGAME & THU PAY GEMS
+            -- 🛡️ MẸO SINH TỒN 1: TỰ ĐỘNG GIẢI MINIGAME OXY & NHỊP TIM
+            Stats.CurrentStatus = "Đang tự giải Minigame Oxy & Nhịp Tim..."
             local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
             local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
             local payRemote = Net:FindFirstChild("RE/OxygenPumpPay")
@@ -354,11 +355,20 @@ local function handleMatchGameplay()
             if oxyRemote then oxyRemote:FireServer(true) end
             if payRemote then payRemote:FireServer() end
 
-            -- TỰ ĐỘNG DIỆT MA & DỊ THƯỜNG
+            -- 🛡️ MẸO SINH TỒN 2: TỰ ĐỘNG DÙNG TASER/SCANNER DIỆT DỊ THƯỜNG (HỒI +2 SANITY & CASH)
             local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
             local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
+            local taserRemote = Net:FindFirstChild("RE/TaserFired")
+            local photoRemote = Net:FindFirstChild("RE/RevealPhoto")
+
             if ghostRemote then ghostRemote:FireServer() end
             if extRemote then extRemote:FireServer() end
+            if taserRemote then taserRemote:FireServer() end
+            if photoRemote then photoRemote:FireServer() end
+
+            -- 🛡️ MẸO SINH TỒN 3: TỰ ĐỘNG THOÁT QUÁI DƯỚI GIƯỜNG (BED MONSTER STRUGGLE)
+            local touchRemote = Net:FindFirstChild("RE/Touch")
+            if touchRemote then touchRemote:FireServer() end
 
             local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
             if playAgain then playAgain:FireServer(true) end
