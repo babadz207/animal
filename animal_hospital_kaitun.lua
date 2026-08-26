@@ -500,17 +500,41 @@ local function handleMatchGameplay()
                 end
             end)
 
-            -- ☕ 2. TỰ ĐỘNG BẢO VỆ SANITY 100% (BẮN TASER HỒI +2 SANITY & UỐNG CÀ PHÊ)
+            -- ☕ 2. TỰ ĐỘNG UỐNG TÁCH CÀ PHÊ TRONG TÚI ĐỒ ĐỂ TỈNH TÁO (DRINK COFFEE CUP TOOL)
             pcall(function()
-                local taserRemote = Net:FindFirstChild("RE/TaserFired")
-                local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+                local bp = LocalPlayer:FindFirstChild("Backpack")
+                local char = LocalPlayer.Character
 
-                if taserRemote then taserRemote:FireServer() end
-                if coffeeRemote then
-                    coffeeRemote:FireServer("Coffee")
-                    coffeeRemote:FireServer("CoffeeMachine")
+                local coffeeTool = nil
+                if bp then
+                    for _, v in pairs(bp:GetChildren()) do
+                        if v:IsA("Tool") and (string.find(string.lower(v.Name), "coffee") or string.find(string.lower(v.Name), "cf") or string.find(string.lower(v.Name), "cafe")) then
+                            coffeeTool = v
+                            break
+                        end
+                    end
+                end
+                if not coffeeTool and char then
+                    for _, v in pairs(char:GetChildren()) do
+                        if v:IsA("Tool") and (string.find(string.lower(v.Name), "coffee") or string.find(string.lower(v.Name), "cf") or string.find(string.lower(v.Name), "cafe")) then
+                            coffeeTool = v
+                            break
+                        end
+                    end
                 end
 
+                -- Nếu có Tách Cà Phê trong túi đồ -> Cầm lên và Uống!
+                if coffeeTool then
+                    Stats.CurrentStatus = "☕ Đang cầm Tách Cà Phê uống duy trì Sanity 100%..."
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum and coffeeTool.Parent == bp then hum:EquipTool(coffeeTool) end
+                    task.wait(0.1)
+                    coffeeTool:Activate()
+                    local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+                    if coffeeRemote then coffeeRemote:FireServer("Coffee") end
+                end
+
+                -- TỰ ĐỘNG LẤY TÁCH CÀ PHÊ MỚI KHI MÁY PHA XONG (SẦU COOLDOWN 180S)
                 local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
                 if coffeeModel then
                     local coffeeStatusText = ""
@@ -524,7 +548,7 @@ local function handleMatchGameplay()
                     local isReady = string.find(coffeeStatusText, "ready") ~= nil or coffeeStatusText == ""
                     local coffeePrompt = coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
 
-                    if isReady and coffeePrompt and coffeePrompt.Enabled then
+                    if isReady and coffeePrompt and coffeePrompt.Enabled and not coffeeTool then
                         if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
                     end
                 end
