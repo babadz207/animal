@@ -469,8 +469,48 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- ☕ TỰ ĐỘNG CHỜ PHA & UỐNG CÀ PHÊ KHI "READY" (SMART BREWING COOLDOWN ENGINE)
+            -- 💀 1. TỰ ĐỘNG CHƠI LẠI (PLAY AGAIN) & HỒI SINH KHI BỊ CHẾT (AUTO RESPAWN / PLAY AGAIN)
             pcall(function()
+                local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
+                local selfRevive = Net:FindFirstChild("RF/TrySelfRevive")
+                local reviveAll = Net:FindFirstChild("RF/TryReviveAll")
+
+                if playAgain then playAgain:FireServer(true) end
+                if selfRevive then pcall(function() selfRevive:InvokeServer() end) end
+                if reviveAll then pcall(function() reviveAll:InvokeServer() end) end
+
+                -- Tự động chọc nút "Play Again" và "Revive Everyone" trên màn hình
+                local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+                if pGui then
+                    for _, desc in pairs(pGui:GetDescendants()) do
+                        if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
+                            local txt = string.lower(desc:IsA("TextButton") and desc.Text or "")
+                            if string.find(txt, "play again") or string.find(txt, "revive") or string.find(txt, "chơi lại") then
+                                Stats.CurrentStatus = "💀 Tự động bấm nút Play Again / Hồi sinh chơi tiếp!"
+                                pcall(function()
+                                    if getconnections then
+                                        for _, conn in pairs(getconnections(desc.MouseButton1Click)) do
+                                            conn:Fire()
+                                        end
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+            end)
+
+            -- ☕ 2. TỰ ĐỘNG BẢO VỆ SANITY 100% (BẮN TASER HỒI +2 SANITY & UỐNG CÀ PHÊ)
+            pcall(function()
+                local taserRemote = Net:FindFirstChild("RE/TaserFired")
+                local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
+
+                if taserRemote then taserRemote:FireServer() end
+                if coffeeRemote then
+                    coffeeRemote:FireServer("Coffee")
+                    coffeeRemote:FireServer("CoffeeMachine")
+                end
+
                 local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
                 if coffeeModel then
                     local coffeeStatusText = ""
@@ -481,17 +521,10 @@ local function handleMatchGameplay()
                         end
                     end
 
-                    -- Kiểm tra xem Cà Phê đã sẵn sàng (ready) hay đang pha (brewing 30s)
                     local isReady = string.find(coffeeStatusText, "ready") ~= nil or coffeeStatusText == ""
                     local coffeePrompt = coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
 
                     if isReady and coffeePrompt and coffeePrompt.Enabled then
-                        Stats.CurrentStatus = "☕ Cà Phê đã Ready! Đang uống Cà Phê duy trì Sanity 100%..."
-                        local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
-                        if coffeeRemote then
-                            coffeeRemote:FireServer("Coffee")
-                            coffeeRemote:FireServer("CoffeeMachine")
-                        end
                         if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
                     end
                 end
