@@ -260,7 +260,7 @@ end)
 -- 3. CHỜ BỆNH NHÂN ĐI VÀO PHÒNG BỆNH -> CHUYỂN SANG PHÒNG KHÁM VÀ CHỮA BỆNH
 -- 4. QUAY TRỞ LẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN TIẾP THEO
 
-local receptionDeskCFrame = CFrame.new(-48.5, 21.0, -67.5)
+local receptionDeskCFrame = CFrame.new(-103.95, 3.10, -2.59)
 
 local function handleMatchGameplay()
     if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
