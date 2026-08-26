@@ -241,26 +241,14 @@ local function claimGemsAndClasses()
             lastClassCheck = os.time()
             local bestClasses = {"Nurse", "Secretary", "Psychologist", "Paramedic", "Doctor", "Surgeon"}
             for _, cName in ipairs(bestClasses) do
-                if equipClassRemote then equipClassRemote:FireServer(cName) end
-            end
-        end
-    end)
-end
-
-ClaimBtn.MouseButton1Click:Connect(function()
-    ClaimBtn.Text = "⏳ Đang Nhận Gems..."
-    claimGemsAndClasses()
-    task.wait(1)
-    ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
-end)
-
--- 🏥 3. LUỒNG QUY TRÌNH QUẢN LÝ BỆNH NHÂN THEO THỜI GIAN THỰC (AUTO STAMP THE FORM & CHECK-IN):
+                if equipClassRemote t-- 🏥 3. LUỒNG QUY TRÌNH QUẢN LÝ BỆNH NHÂN THEO THỜI GIAN THỰC (AUTO TAKE PHOTO -> STAMP FORMS -> CHECK-IN):
 -- 1. ĐỨNG TẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN ĐẾN CỬA SỔ
--- 2. KHI BỆNH NHÂN ĐẾN -> TỰ ĐỘNG BẤM DẤU (STAMP THE FORM), CHỤP ẢNH, DÒ CHECK-IN & TIẾP NHẬN
+-- 2. KHI BỆNH NHÂN ĐẾN -> CHỤP ẢNH (TAKE PHOTO) -> ĐÓNG DẤU (STAMP FORMS) -> TIẾP NHẬN
 -- 3. CHỜ BỆNH NHÂN ĐI VÀO PHÒNG BỆNH -> CHUYỂN SANG PHÒNG KHÁM VÀ CHỮA BỆNH
 -- 4. QUAY TRỞ LẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN TIẾP THEO
 
 local receptionDeskCFrame = CFrame.new(-103.95, 3.10, -2.59)
+local coffeeCFrame = CFrame.new(-123.77, 3.80, 10.31)
 
 local function handleMatchGameplay()
     if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
@@ -269,25 +257,33 @@ local function handleMatchGameplay()
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then return end
 
-            -- 🔍 DÒ TÌM TOÀN BỘ PROXIMITY PROMPT ĐANG HOẠT ĐỘNG IN-GAME
+            -- 🔍 DÒ TÌM PROXIMITY PROMPT ĐANG HOẠT ĐỘNG
             local activeBedPrompt = nil
             local activeAnalyzerPrompt = nil
             local activeMonitorPrompt = nil
-            local activeReceptionPrompts = {}
+            local activeCameraPrompt = nil
+            local activeFormPrompt = nil
 
+            -- Dò tìm Prompt Máy Ảnh (Take Photo) & Đóng Dấu (Stamp Forms)
+            local checkInFolder = workspace.Misc:FindFirstChild("CheckIn")
+            if checkInFolder then
+                local cam = checkInFolder:FindFirstChild("Camera")
+                local form = checkInFolder:FindFirstChild("Form")
+                if cam then
+                    local p = cam:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if p and p.Enabled then activeCameraPrompt = p end
+                end
+                if form then
+                    local p = form:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if p and p.Enabled then activeFormPrompt = p end
+                end
+            end
+
+            -- Dò tìm các nút trong Phòng Khám & Giường Bệnh
             for _, descendant in pairs(workspace:GetDescendants()) do
                 if descendant:IsA("ProximityPrompt") and descendant.Enabled then
                     local act = string.lower(descendant.ActionText or "")
-                    local obj = string.lower(descendant.ObjectText or "")
-                    local name = string.lower(descendant.Name or "")
-                    local parentName = string.lower(descendant.Parent and descendant.Parent.Name or "")
-
-                    -- 📋 Các nút Bàn Tiếp Tân (Stamp the form, Check-in, Ring Bell, Take photo, Inspect)
-                    local isReception = string.find(act, "stamp") or string.find(act, "check") or string.find(act, "ring") or string.find(act, "photo") or string.find(act, "form") or string.find(act, "inspect") or string.find(obj, "patient") or string.find(parentName, "bell") or string.find(parentName, "stamp") or string.find(name, "stamp")
-
-                    if isReception then
-                        table.insert(activeReceptionPrompts, descendant)
-                    elseif string.find(act, "apply") then
+                    if string.find(act, "apply") then
                         activeBedPrompt = descendant
                     elseif string.find(act, "analyze") then
                         activeAnalyzerPrompt = descendant
@@ -297,28 +293,34 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- 📌 TRƯỜNG HỢP 1: CÓ BỆNH NHÂN MỚI TỚI CỬA SỔ BÀN TIẾP TÂN (CÓ NÚT CHECK-IN / STAMP THE FORM)
-            if #activeReceptionPrompts > 0 then
-                Stats.CurrentStatus = "📋 1. Bệnh nhân đã tới - Tự đóng dấu (Stamp form) & Check-in..."
-                for _, prompt in ipairs(activeReceptionPrompts) do
-                    if prompt and prompt.Parent then
-                        local p = prompt.Parent
-                        local pos = p:IsA("BasePart") and p.CFrame or p:GetPivot()
-                        root.CFrame = pos * CFrame.new(0, 3, 0)
-                        task.wait(0.15)
-                        if fireproximityprompt then fireproximityprompt(prompt, 0) end
-                    end
+            -- 📌 TRƯỜNG HỢP 1: BỆNH NHÂN TỚI CỬA SỔ -> CHỤP ẢNH (TAKE PHOTO) & ĐÓNG DẤU (STAMP FORMS)
+            if activeCameraPrompt or activeFormPrompt then
+                -- BƯỚC A: Chụp Ảnh Bệnh Nhân (Take Photo)
+                if activeCameraPrompt and activeCameraPrompt.Parent then
+                    Stats.CurrentStatus = "📸 1. Đang bấm Chụp Ảnh Bệnh Nhân (Take Photo)..."
+                    local p = activeCameraPrompt.Parent
+                    local pos = p:IsA("BasePart") and p.CFrame or p:GetPivot()
+                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                    task.wait(0.2)
+                    if fireproximityprompt then fireproximityprompt(activeCameraPrompt, 0) end
+                    task.wait(0.3)
                 end
-                task.wait(0.3)
 
-                -- Tiếp nhận bệnh nhân & Đóng dấu Form
+                -- BƯỚC B: Đóng Dấu Hồ Sơ (Stamp Forms)
+                if activeFormPrompt and activeFormPrompt.Parent then
+                    Stats.CurrentStatus = "📋 2. Đang bấm Đóng Dấu Hồ Sơ (Stamp Forms)..."
+                    local p = activeFormPrompt.Parent
+                    local pos = p:IsA("BasePart") and p.CFrame or p:GetPivot()
+                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                    task.wait(0.2)
+                    if fireproximityprompt then fireproximityprompt(activeFormPrompt, 0) end
+                    task.wait(0.3)
+                end
+
+                -- BƯỚC C: Chấp nhận Bệnh nhân
                 local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
                 if dialogRemote then dialogRemote:FireServer(true) end
 
-                local stampRemote = Net:FindFirstChild("RE/StampForm") or Net:FindFirstChild("RE/Stamp")
-                if stampRemote then stampRemote:FireServer(true) end
-
-                -- Chờ bệnh nhân di chuyển vào phòng
                 Stats.CurrentStatus = "⏳ Đang chờ Bệnh Nhân đi vào Phòng Bệnh..."
                 task.wait(1.5)
 
@@ -369,6 +371,12 @@ local function handleMatchGameplay()
             local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
             if coffeeRemote then coffeeRemote:FireServer("Coffee") end
 
+            local coffeeModel = workspace.Misc:FindFirstChild("CoffeeMachine")
+            local coffeePrompt = coffeeModel and coffeeModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if coffeePrompt and coffeePrompt.Enabled then
+                if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
+            end
+
             -- 🛡️ TỰ ĐỘNG GIẢI MINIGAMES & THU PAY GEMS
             local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
             local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
@@ -380,6 +388,20 @@ local function handleMatchGameplay()
 
             -- 🛡️ TỰ ĐỘNG DIỆT DỊ THƯỜNG / THOÁT QUÁI GIƯỜNG
             local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
+            local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
+            local taserRemote = Net:FindFirstChild("RE/TaserFired")
+            local touchRemote = Net:FindFirstChild("RE/Touch")
+
+            if ghostRemote then ghostRemote:FireServer() end
+            if extRemote then extRemote:FireServer() end
+            if taserRemote then taserRemote:FireServer() end
+            if touchRemote then touchRemote:FireServer() end
+
+            local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
+            if playAgain then playAgain:FireServer(true) end
+        end)
+    end
+end       local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
             local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
             local taserRemote = Net:FindFirstChild("RE/TaserFired")
             local touchRemote = Net:FindFirstChild("RE/Touch")
