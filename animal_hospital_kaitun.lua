@@ -479,25 +479,37 @@ local function handleMatchGameplay()
                 if fireproximityprompt then fireproximityprompt(coffeePrompt, 0) end
             end
 
-            -- 🛡️ TỰ ĐỘNG GIẢI MINIGAMES & THU PAY GEMS
-            local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
-            local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
-            local payRemote = Net:FindFirstChild("RE/OxygenPumpPay")
+            -- 👾 TỰ ĐỘNG THOÁT KHỎI QUÁI VẬT BẮT / GIẪY GIỤA THOÁT CẦU (AUTO ESCAPE MONSTER GRAB)
+            local touchRemote = Net:FindFirstChild("RE/Touch")
+            local controlRemote = Net:FindFirstChild("RE/ControlEnableSwitch")
+            local outGhostRemote = Net:FindFirstChild("RE/OutGhost")
+            local selfReviveRemote = Net:FindFirstChild("RF/TrySelfRevive")
 
-            if hbRemote then hbRemote:FireServer(true) end
-            if oxyRemote then oxyRemote:FireServer(true) end
-            if payRemote then payRemote:FireServer() end
+            if touchRemote then touchRemote:FireServer() end
+            if controlRemote then controlRemote:FireServer(true) end
+            if outGhostRemote then outGhostRemote:FireServer() end
+            if selfReviveRemote then pcall(function() selfReviveRemote:InvokeServer() end) end
 
-            -- 🛡️ TỰ ĐỘNG DIỆT DỊ THƯỜNG / THOÁT QUÁI GIƯỜNG
+            -- Dò tìm nút Giãy Giụa / Struggle / Escape khi bị Quái túm
+            for _, desc in pairs(workspace:GetDescendants()) do
+                if desc:IsA("ProximityPrompt") and desc.Enabled then
+                    local act = string.lower(desc.ActionText or "")
+                    local name = string.lower(desc.Name or "")
+                    if string.find(act, "struggle") or string.find(act, "escape") or string.find(act, "break") or string.find(act, "kick") or string.find(act, "resist") or string.find(name, "struggle") or string.find(name, "escape") then
+                        Stats.CurrentStatus = "👾 Bị Quái Vật bắt! Đang tự động giãy giụa giải thoát..."
+                        if fireproximityprompt then fireproximityprompt(desc, 0) end
+                    end
+                end
+            end
+
+            -- 🛡️ TỰ ĐỘNG BẮN TASER/SCANNER DIỆT QUÁI BẮT (HỒI +2 SANITY)
             local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
             local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
             local taserRemote = Net:FindFirstChild("RE/TaserFired")
-            local touchRemote = Net:FindFirstChild("RE/Touch")
 
             if ghostRemote then ghostRemote:FireServer() end
             if extRemote then extRemote:FireServer() end
             if taserRemote then taserRemote:FireServer() end
-            if touchRemote then touchRemote:FireServer() end
 
             local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
             if playAgain then playAgain:FireServer(true) end
