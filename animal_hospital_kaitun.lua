@@ -26,7 +26,11 @@ if queueOnTeleport then
         queueOnTeleport([[
             task.wait(2)
             pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/animal_hospital_kaitun.lua"))()
+                local s, code = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/animal_hospital_kaitun.lua") end)
+                if s and code and #code > 10 then
+                    local fn = loadstring(code)
+                    if type(fn) == "function" then fn() end
+                end
             end)
         ]])
     end)
