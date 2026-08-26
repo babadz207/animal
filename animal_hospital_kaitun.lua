@@ -1,0 +1,317 @@
+-- =================================================================
+-- 👑 ANIMAL HOSPITAL - KAITUN LIVE DASHBOARD & AUTO 24/7
+-- =================================================================
+
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local Net = ReplicatedStorage:WaitForChild("Util"):WaitForChild("Net")
+
+getgenv().KaitunEnabled = true
+
+local Stats = {
+    CurrentStatus = "Đang khởi tạo hệ thống...",
+    GemsClaimed = 0,
+    PatientsHealed = 0,
+    StartTime = os.time()
+}
+
+-- 🔄 AUTO TELEPORT PERSISTENCE
+local queueOnTeleport = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+if queueOnTeleport then
+    pcall(function()
+        queueOnTeleport([[
+            task.wait(2)
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/animal_hospital_kaitun.lua"))()
+            end)
+        ]])
+    end)
+end
+
+-- Xóa UI cũ nếu có
+if CoreGui:FindFirstChild("AnimalHospitalDashboardUI") then
+    CoreGui.AnimalHospitalDashboardUI:Destroy()
+end
+
+-- 🎨 KHUNG GIAO DIỆN HIỆN ĐẠI DASHBOARD
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AnimalHospitalDashboardUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = (gethui and gethui()) or CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 210)
+MainFrame.Position = UDim2.new(1, -275, 0, 50)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 18, 26)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 12)
+UICorner.Parent = MainFrame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 210, 140)
+UIStroke.Thickness = 1.5
+UIStroke.Parent = MainFrame
+
+-- TIÊU ĐỀ
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 32)
+Title.BackgroundTransparency = 1
+Title.Text = "👑 ANIMAL HOSPITAL - KAITUN LIVE"
+Title.TextColor3 = Color3.fromRGB(0, 230, 150)
+Title.TextSize = 11
+Title.Font = Enum.Font.GothamBold
+Title.Parent = MainFrame
+
+-- HIỂN THỊ TRẠNG THÁI REAL-TIME
+local StatusBox = Instance.new("Frame")
+StatusBox.Size = UDim2.new(1, -20, 0, 42)
+StatusBox.Position = UDim2.new(0, 10, 0, 35)
+StatusBox.BackgroundColor3 = Color3.fromRGB(25, 30, 42)
+StatusBox.BorderSizePixel = 0
+StatusBox.Parent = MainFrame
+
+local StatusCorner = Instance.new("UICorner")
+StatusCorner.CornerRadius = UDim.new(0, 8)
+StatusCorner.Parent = StatusBox
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -12, 1, 0)
+StatusLabel.Position = UDim2.new(0, 6, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "📍 " .. Stats.CurrentStatus
+StatusLabel.TextColor3 = Color3.fromRGB(240, 240, 255)
+StatusLabel.TextSize = 10
+StatusLabel.TextWrapped = true
+StatusLabel.Font = Enum.Font.GothamMedium
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = StatusBox
+
+-- HIỂN THỊ THỐNG KÊ
+local StatsLabel = Instance.new("TextLabel")
+StatsLabel.Size = UDim2.new(1, -20, 0, 45)
+StatsLabel.Position = UDim2.new(0, 10, 0, 82)
+StatsLabel.BackgroundTransparency = 1
+StatsLabel.Text = "💎 Gems/Rewards: 0  |  🩺 Trị Bệnh: 0\n⏱️ Thời Gian Chạy: 00:00:00"
+StatsLabel.TextColor3 = Color3.fromRGB(200, 210, 230)
+StatsLabel.TextSize = 10
+StatsLabel.Font = Enum.Font.Gotham
+StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatsLabel.Parent = MainFrame
+
+-- NÚT BẬT TẮT AUTO
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(1, -20, 0, 34)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 132)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 170, 85)
+ToggleBtn.Text = "⚡ KAITUN AUTO: ON"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextSize = 11
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.Parent = MainFrame
+
+local BtnCorner1 = Instance.new("UICorner")
+BtnCorner1.CornerRadius = UDim.new(0, 8)
+BtnCorner1.Parent = ToggleBtn
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    getgenv().KaitunEnabled = not getgenv().KaitunEnabled
+    if getgenv().KaitunEnabled then
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 170, 85)
+        ToggleBtn.Text = "⚡ KAITUN AUTO: ON"
+    else
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(170, 40, 50)
+        ToggleBtn.Text = "⚡ KAITUN AUTO: OFF"
+    end
+end)
+
+-- NÚT THU HOẠCH GEM NGAY
+local ClaimBtn = Instance.new("TextButton")
+ClaimBtn.Size = UDim2.new(1, -20, 0, 30)
+ClaimBtn.Position = UDim2.new(0, 10, 0, 170)
+ClaimBtn.BackgroundColor3 = Color3.fromRGB(210, 150, 20)
+ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
+ClaimBtn.TextColor3 = Color3.fromRGB(20, 20, 30)
+ClaimBtn.TextSize = 10
+ClaimBtn.Font = Enum.Font.GothamBold
+ClaimBtn.Parent = MainFrame
+
+local BtnCorner2 = Instance.new("UICorner")
+BtnCorner2.CornerRadius = UDim.new(0, 8)
+BtnCorner2.Parent = ClaimBtn
+
+-- 🕒 CẬP NHẬT UI REAL-TIME
+task.spawn(function()
+    while true do
+        local elapsed = os.time() - Stats.StartTime
+        local hours = math.floor(elapsed / 3600)
+        local mins = math.floor((elapsed % 3600) / 60)
+        local secs = elapsed % 60
+        local timeStr = string.format("%02d:%02d:%02d", hours, mins, secs)
+
+        StatusLabel.Text = "📍 " .. Stats.CurrentStatus
+        StatsLabel.Text = "💎 Gems/Rewards: " .. Stats.GemsClaimed .. "  |  🩺 Trị Bệnh: " .. Stats.PatientsHealed .. "\n⏱️ Thời Gian Chạy: " .. timeStr
+        task.wait(0.5)
+    end
+end)
+
+-- 🏠 1. TELEPORT CHÍNH XÁC VÀO TRUNG TÂM TOUCH PART ROOM1/ROOM2/ROOM3 VÀ BẤM START NOW
+local function handleLobby()
+    if game.PlaceId ~= 104522435597696 then
+        pcall(function()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+
+            local roomsFolder = workspace:FindFirstChild("Rooms")
+            local touchPart = nil
+
+            if roomsFolder then
+                for _, room in pairs(roomsFolder:GetChildren()) do
+                    local t = room:FindFirstChild("Touch")
+                    if t and t:IsA("BasePart") then
+                        touchPart = t
+                        break
+                    end
+                end
+            end
+
+            -- Teleport thẳng vào giữa Ô Vuông Xanh
+            if root and touchPart then
+                Stats.CurrentStatus = "⚡ Đã Teleport vào Ô Vuông Xanh (Rooms.Touch)..."
+                root.CFrame = touchPart.CFrame * CFrame.new(0, 3, 0)
+                task.wait(0.3)
+
+                -- Kích hoạt START NOW
+                local quickStart = Net:FindFirstChild("RE/Quickstart")
+                if quickStart then
+                    Stats.CurrentStatus = "🚀 Bấm START NOW vào trận ngay!"
+                    quickStart:FireServer()
+                end
+            end
+        end)
+    end
+end
+
+-- 🩺 2. MỞ KHÓA CLASS & NHẬN GEMS
+local lastClassCheck = 0
+local function claimGemsAndClasses()
+    pcall(function()
+        local claimRemote = Net:FindFirstChild("RE/ClaimBookReward")
+        local equipClassRemote = Net:FindFirstChild("RE/EquipClass")
+
+        local BookData = require(ReplicatedStorage.Data.Book)
+        if claimRemote and BookData then
+            for bookId, _ in pairs(BookData) do
+                claimRemote:FireServer(bookId)
+                Stats.GemsClaimed = Stats.GemsClaimed + 1
+            end
+        end
+
+        if os.time() - lastClassCheck > 10 then
+            lastClassCheck = os.time()
+            local bestClasses = {"Nurse", "Secretary", "Psychologist", "Paramedic", "Doctor", "Surgeon"}
+            for _, cName in ipairs(bestClasses) do
+                if equipClassRemote then equipClassRemote:FireServer(cName) end
+            end
+        end
+    end)
+end
+
+ClaimBtn.MouseButton1Click:Connect(function()
+    ClaimBtn.Text = "⏳ Đang Nhận Gems..."
+    claimGemsAndClasses()
+    task.wait(1)
+    ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
+end)
+
+-- 🏥 3. TELEPORT TRỰC TIẾP CHỮA BỆNH IN-MATCH (KHÔNG SPAM CHỮ YOU CAN'T CARRY MORE MEDICINE)
+local function handleMatchGameplay()
+    if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
+        Stats.CurrentStatus = "⚡ Teleport chữa bệnh & lấy dụng cụ y tế..."
+        pcall(function()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+            -- Đếm số lượng dụng cụ y tế đang cầm
+            local heldToolsCount = 0
+            if backpack then heldToolsCount = heldToolsCount + #backpack:GetChildren() end
+            if char then
+                for _, v in pairs(char:GetChildren()) do
+                    if v:IsA("Tool") then heldToolsCount = heldToolsCount + 1 end
+                end
+            end
+
+            for _, descendant in pairs(workspace:GetDescendants()) do
+                if descendant:IsA("ProximityPrompt") and descendant.Enabled then
+                    local actionText = string.lower(descendant.ActionText or "")
+
+                    -- Nếu túi đồ đã đầy (>= 3), bỏ qua các ô nhặt thuốc
+                    local isMedicinePickup = string.find(actionText, "drops") or string.find(actionText, "bandage") or string.find(actionText, "medkit") or string.find(actionText, "scalpel") or string.find(actionText, "organ") or string.find(actionText, "antibiotic") or string.find(actionText, "scissors") or string.find(actionText, "transplant") or string.find(actionText, "medicine")
+                    
+                    if heldToolsCount >= 3 and isMedicinePickup then
+                        -- Túi đầy -> Bỏ qua nhặt thuốc
+                    else
+                        local parentPart = descendant.Parent
+                        if parentPart and root then
+                            local targetPos = nil
+                            if parentPart:IsA("BasePart") then
+                                targetPos = parentPart.CFrame * CFrame.new(0, 3, 0)
+                            elseif parentPart:IsA("Model") then
+                                targetPos = parentPart:GetPivot() * CFrame.new(0, 3, 0)
+                            end
+
+                            if targetPos then
+                                root.CFrame = targetPos
+                                task.wait(0.02)
+                                if fireproximityprompt then
+                                    fireproximityprompt(descendant, 0)
+                                    Stats.PatientsHealed = Stats.PatientsHealed + 1
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            Stats.CurrentStatus = "Đang tự giải Minigame Oxy & Nhịp Tim..."
+            local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
+            local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
+            local payRemote = Net:FindFirstChild("RE/OxygenPumpPay")
+
+            if hbRemote then hbRemote:FireServer(true) end
+            if oxyRemote then oxyRemote:FireServer(true) end
+            if payRemote then payRemote:FireServer() end
+
+            local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
+            local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
+            if ghostRemote then ghostRemote:FireServer() end
+            if extRemote then extRemote:FireServer() end
+
+            local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
+            if playAgain then playAgain:FireServer(true) end
+        end)
+    end
+end
+
+-- 🔄 ENGINE KAITUN MAIN LOOP
+task.spawn(function()
+    while true do
+        if getgenv().KaitunEnabled then
+            handleLobby()
+            claimGemsAndClasses()
+            handleMatchGameplay()
+        end
+        task.wait(0.5)
+    end
+end)
+
+print("👑 VERIFIED ROOM1.TOUCH LOBBY KAITUN LOADED!")
