@@ -254,11 +254,14 @@ ClaimBtn.MouseButton1Click:Connect(function()
     ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
 end)
 
--- 🏥 3. LUỒNG QUY TRÌNH CHƠI LẦN LƯỢT CHUẨN XÁC 100%:
--- BƯỚC 1: Check-in tại Bàn Tiếp Tân -> Phân biệt Bệnh Nhân Thường hay Quỷ/Dị Thường
--- BƯỚC 2: Phân tích mẫu bệnh tại Analyzer
--- BƯỚC 3: Xử lý kết quả kiểm tra tại Monitor
--- BƯỚC 4: Teleport tới Giường phẫu thuật/chữa bệnh (Apply Treatment)
+-- 🏥 3. LUỒNG QUY TRÌNH QUẢN LÝ BỆNH NHÂN THEO THỜI GIAN THỰC:
+-- 1. ĐỨNG TẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN ĐẾN CỬA SỔ
+-- 2. KHI BỆNH NHÂN ĐẾN -> DÒ PROXIMITY PROMPT / CHECK-IN -> TIẾP NHẬN / XỬ LÝ QUỶ
+-- 3. CHỜ BỆNH NHÂN ĐI VÀO PHÒNG BỆNH -> CHUYỂN SANG PHÒNG KHÁM VÀ CHỮA BỆNH
+-- 4. QUAY TRỞ LẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN TIẾP THEO
+
+local receptionDeskCFrame = CFrame.new(-48.5, 21.0, -67.5)
+
 local function handleMatchGameplay()
     if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
         pcall(function()
@@ -266,43 +269,21 @@ local function handleMatchGameplay()
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then return end
 
-            -- BƯỚC 1: CHẠY ĐẾN BÀN TIẾP TÂN DÒ CHECK-IN BỆNH NHÂN MỚI
-            local receptionPrompt = nil
+            -- 🔍 DÒ TÌM PROXIMITY PROMPT ĐANG HOẠT ĐỘNG
+            local activeBedPrompt = nil
+            local activeAnalyzerPrompt = nil
+            local activeMonitorPrompt = nil
+            local activeCheckInPrompt = nil
+
             for _, descendant in pairs(workspace:GetDescendants()) do
                 if descendant:IsA("ProximityPrompt") and descendant.Enabled then
                     local act = string.lower(descendant.ActionText or "")
                     local obj = string.lower(descendant.ObjectText or "")
-                    if string.find(act, "check") or string.find(act, "reception") or string.find(obj, "patient") or string.find(act, "inspect") then
-                        receptionPrompt = descendant
-                        break
-                    end
-                end
-            end
+                    local parentName = string.lower(descendant.Parent and descendant.Parent.Name or "")
 
-            if receptionPrompt and receptionPrompt.Parent then
-                Stats.CurrentStatus = "📋 BƯỚC 1: Đang Check-in Bệnh nhân tại Bàn Tiếp Tân..."
-                local pos = receptionPrompt.Parent:IsA("BasePart") and receptionPrompt.Parent.CFrame or receptionPrompt.Parent:GetPivot()
-                root.CFrame = pos * CFrame.new(0, 3, 0)
-                task.wait(0.2)
-                if fireproximityprompt then fireproximityprompt(receptionPrompt, 0) end
-                task.wait(0.4)
-
-                -- Tự động chấp nhận Bệnh Nhân Thường hoặc Xử Lý Quỷ (Skinwalker)
-                local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
-                if dialogRemote then
-                    dialogRemote:FireServer(true)
-                end
-            end
-
-            -- BƯỚC 2: DÒ CÁC PHÒNG BỆNH ĐANG CÓ BỆNH NHÂN NẰM GIƯỜNG
-            local activeBedPrompt = nil
-            local activeAnalyzerPrompt = nil
-            local activeMonitorPrompt = nil
-
-            for _, descendant in pairs(workspace:GetDescendants()) do
-                if descendant:IsA("ProximityPrompt") and descendant.Enabled then
-                    local act = string.lower(descendant.ActionText or "")
-                    if string.find(act, "apply") then
+                    if string.find(act, "check") or string.find(act, "reception") or string.find(act, "ring") or string.find(obj, "patient") or string.find(parentName, "bell") then
+                        activeCheckInPrompt = descendant
+                    elseif string.find(act, "apply") then
                         activeBedPrompt = descendant
                     elseif string.find(act, "analyze") then
                         activeAnalyzerPrompt = descendant
@@ -312,45 +293,71 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- BƯỚC 2: KHÁM BỆNH & PHÂN TÍCH MẪU TẠI ANALYZER
-            if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
-                Stats.CurrentStatus = "🔬 BƯỚC 2: Phân tích mẫu bệnh nhân tại Analyzer..."
-                local pos = activeAnalyzerPrompt.Parent:IsA("BasePart") and activeAnalyzerPrompt.Parent.CFrame or activeAnalyzerPrompt.Parent:GetPivot()
-                root.CFrame = pos * CFrame.new(0, 3, 0)
-                task.wait(0.2)
-                if fireproximityprompt then fireproximityprompt(activeAnalyzerPrompt, 0) end
-                task.wait(0.3)
-            end
-
-            -- BƯỚC 3: XỬ LÝ KẾT QUẢ TẠI MONITOR
-            if activeMonitorPrompt and activeMonitorPrompt.Parent then
-                Stats.CurrentStatus = "💻 BƯỚC 3: Xử lý kết quả khám bệnh tại Monitor..."
-                local pos = activeMonitorPrompt.Parent:IsA("BasePart") and activeMonitorPrompt.Parent.CFrame or activeMonitorPrompt.Parent:GetPivot()
-                root.CFrame = pos * CFrame.new(0, 3, 0)
-                task.wait(0.2)
-                if fireproximityprompt then fireproximityprompt(activeMonitorPrompt, 0) end
-                task.wait(0.3)
-            end
-
-            -- BƯỚC 4: CHỮA BỆNH TẠI GIƯỜNG (APPLY TREATMENT)
-            if activeBedPrompt and activeBedPrompt.Parent then
-                Stats.CurrentStatus = "🩺 BƯỚC 4: Teleport tới Giường phẫu thuật/chữa bệnh..."
-                local pos = activeBedPrompt.Parent:IsA("BasePart") and activeBedPrompt.Parent.CFrame or activeBedPrompt.Parent:GetPivot()
-                root.CFrame = pos * CFrame.new(0, 3, 0)
-                task.wait(0.2)
-                if fireproximityprompt then
-                    fireproximityprompt(activeBedPrompt, 0)
-                    Stats.PatientsHealed = Stats.PatientsHealed + 1
+            -- 📌 TRƯỜNG HỢP 1: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
+            if activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
+                -- BƯỚC A: Phân tích mẫu bệnh tại Analyzer
+                if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
+                    Stats.CurrentStatus = "🔬 2. Phân tích mẫu bệnh nhân tại Analyzer..."
+                    local pos = activeAnalyzerPrompt.Parent:IsA("BasePart") and activeAnalyzerPrompt.Parent.CFrame or activeAnalyzerPrompt.Parent:GetPivot()
+                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                    task.wait(0.3)
+                    if fireproximityprompt then fireproximityprompt(activeAnalyzerPrompt, 0) end
+                    task.wait(0.3)
                 end
-                task.wait(0.4)
+
+                -- BƯỚC B: Xử lý kết quả tại Monitor
+                if activeMonitorPrompt and activeMonitorPrompt.Parent then
+                    Stats.CurrentStatus = "💻 3. Xử lý kết quả khám bệnh tại Monitor..."
+                    local pos = activeMonitorPrompt.Parent:IsA("BasePart") and activeMonitorPrompt.Parent.CFrame or activeMonitorPrompt.Parent:GetPivot()
+                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                    task.wait(0.3)
+                    if fireproximityprompt then fireproximityprompt(activeMonitorPrompt, 0) end
+                    task.wait(0.3)
+                end
+
+                -- BƯỚC C: Chữa bệnh tại Giường
+                if activeBedPrompt and activeBedPrompt.Parent then
+                    Stats.CurrentStatus = "🩺 4. Teleport tới Giường phẫu thuật/chữa bệnh..."
+                    local pos = activeBedPrompt.Parent:IsA("BasePart") and activeBedPrompt.Parent.CFrame or activeBedPrompt.Parent:GetPivot()
+                    root.CFrame = pos * CFrame.new(0, 3, 0)
+                    task.wait(0.3)
+                    if fireproximityprompt then
+                        fireproximityprompt(activeBedPrompt, 0)
+                        Stats.PatientsHealed = Stats.PatientsHealed + 1
+                    end
+                    task.wait(0.5)
+                end
+
+            -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN MỚI TỚI CỬA SỔ BÀN TIẾP TÂN
+            elseif activeCheckInPrompt and activeCheckInPrompt.Parent then
+                Stats.CurrentStatus = "📋 1. Bệnh nhân đã tới - Đang Check-in tại Bàn Tiếp Tân..."
+                local pos = activeCheckInPrompt.Parent:IsA("BasePart") and activeCheckInPrompt.Parent.CFrame or activeCheckInPrompt.Parent:GetPivot()
+                root.CFrame = pos * CFrame.new(0, 3, 0)
+                task.wait(0.3)
+                if fireproximityprompt then fireproximityprompt(activeCheckInPrompt, 0) end
+                task.wait(0.5)
+
+                -- Tiếp nhận bệnh nhân
+                local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
+                if dialogRemote then dialogRemote:FireServer(true) end
+
+                -- Chờ bệnh nhân di chuyển vào phòng
+                Stats.CurrentStatus = "⏳ Đang chờ Bệnh Nhân đi vào Phòng Bệnh..."
+                task.wait(2)
+
+            -- 📌 TRƯỜNG HỢP 3: CHƯA CÓ BỆNH NHÂN NÀO -> ĐỨNG TẠI BÀN TIẾP TÂN NGHỈ VÀ CHỜ
+            else
+                Stats.CurrentStatus = "⏳ 1. Đang đứng tại Bàn Tiếp Tân chờ Bệnh Nhân mới đến..."
+                if (root.Position - receptionDeskCFrame.Position).Magnitude > 8 then
+                    root.CFrame = receptionDeskCFrame
+                end
             end
 
-            -- ☕ MẸO GAMEPLAY: TỰ ĐỘNG UỐNG CÀ PHÊ HỒI PHỤC SANITY VỀ 100%
+            -- ☕ TỰ ĐỘNG UỐNG CÀ PHÊ DUY TRÌ SANITY 100%
             local coffeeRemote = Net:FindFirstChild("RE/ApplySpeedEffect")
             if coffeeRemote then coffeeRemote:FireServer("Coffee") end
 
-            -- 🛡️ MẸO GAMEPLAY: TỰ ĐỘNG GIẢI MINIGAME OXY & NHỊP TIM
-            Stats.CurrentStatus = "Đang tự giải Minigame Oxy & Nhịp Tim..."
+            -- 🛡️ TỰ ĐỘNG GIẢI MINIGAMES & THU PAY GEMS
             local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
             local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
             local payRemote = Net:FindFirstChild("RE/OxygenPumpPay")
@@ -359,19 +366,15 @@ local function handleMatchGameplay()
             if oxyRemote then oxyRemote:FireServer(true) end
             if payRemote then payRemote:FireServer() end
 
-            -- 🛡️ MẸO SINH TỒN 2: TỰ ĐỘNG DÙNG TASER/SCANNER DIỆT DỊ THƯỜNG (HỒI +2 SANITY & CASH)
+            -- 🛡️ TỰ ĐỘNG DIỆT DỊ THƯỜNG / THOÁT QUÁI GIƯỜNG
             local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
             local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
             local taserRemote = Net:FindFirstChild("RE/TaserFired")
-            local photoRemote = Net:FindFirstChild("RE/RevealPhoto")
+            local touchRemote = Net:FindFirstChild("RE/Touch")
 
             if ghostRemote then ghostRemote:FireServer() end
             if extRemote then extRemote:FireServer() end
             if taserRemote then taserRemote:FireServer() end
-            if photoRemote then photoRemote:FireServer() end
-
-            -- 🛡️ MẸO SINH TỒN 3: TỰ ĐỘNG THOÁT QUÁI DƯỚI GIƯỜNG (BED MONSTER STRUGGLE)
-            local touchRemote = Net:FindFirstChild("RE/Touch")
             if touchRemote then touchRemote:FireServer() end
 
             local playAgain = Net:FindFirstChild("RE/PlayAgainVote")
