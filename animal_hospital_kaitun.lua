@@ -368,75 +368,60 @@ local function handleMatchGameplay()
 
             -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
             elseif activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
-                -- 🔬 ĐẶC BIỆT ROOM 1: XÁC NHẬN XÉT NGHIỆM DNA BỆNH NHÂN
-                local r1 = workspace:FindFirstChild("Rooms") and workspace.Rooms:FindFirstChild("Room1", true)
-                if r1 then
-                    local minigame = r1:FindFirstChild("Minigame", true)
-                    if minigame then
-                        local analyzer = minigame:FindFirstChild("Analyzer")
-                        local monitor = minigame:FindFirstChild("Monitor")
+                -- 🔬 QUY TRÌNH MÁY BÊN TRÁI (ANALYZER) ➔ MÁY BÊN PHẢI (MONITOR) ➔ GIƯỜNG BỆNH
+                pcall(function()
+                    local medicalFolder = workspace.Rooms:FindFirstChild("Medical") or workspace.Rooms:FindFirstChild("Emergency")
+                    if medicalFolder then
+                        for _, room in pairs(medicalFolder:GetChildren()) do
+                            local minigame = room:FindFirstChild("Minigame", true)
+                            if minigame then
+                                local analyzer = minigame:FindFirstChild("Analyzer")
+                                local monitor = minigame:FindFirstChild("Monitor")
+                                local bed = minigame:FindFirstChild("Bed") and minigame.Bed:FindFirstChild("InBed")
 
-                        -- 🧪 1. Xét nghiệm mẫu DNA tại Room 1 Analyzer
-                        if analyzer then
-                            local p = analyzer:FindFirstChildWhichIsA("ProximityPrompt", true)
-                            if p and p.Enabled then
-                                Stats.CurrentStatus = "🔬 ROOM 1: Đang xét nghiệm mẫu DNA Bệnh Nhân..."
-                                local pos = analyzer:IsA("BasePart") and analyzer.CFrame or analyzer:GetPivot()
-                                root.CFrame = pos * CFrame.new(0, 3, 0)
-                                task.wait(0.2)
-                                if fireproximityprompt then fireproximityprompt(p, 0) end
-                                task.wait(0.3)
-                            end
-                        end
+                                -- 1. BƯỚC A: TELEPORT MÁY BÊN TRÁI (ANALYZER) - XÉT NGHIỆM MẪU
+                                if analyzer then
+                                    local p = analyzer:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                    if p and p.Enabled then
+                                        Stats.CurrentStatus = "🔬 1. Teleport tới Máy Bên Trái (Analyzer) - Xét nghiệm mẫu..."
+                                        root.CFrame = analyzer:GetPivot() * CFrame.new(0, 3, 0)
+                                        task.wait(0.2)
+                                        if fireproximityprompt then fireproximityprompt(p, 0) end
+                                        task.wait(0.3)
+                                    end
+                                end
 
-                        -- 💻 2. Xác nhận và Kiểm tra kết quả DNA tại Room 1 Monitor
-                        if monitor then
-                            for _, p in pairs(monitor:GetChildren()) do
-                                if p:IsA("ProximityPrompt") and p.Enabled then
-                                    Stats.CurrentStatus = "💻 ROOM 1: Đang xác nhận kết quả xét nghiệm DNA..."
-                                    local pos = monitor:IsA("BasePart") and monitor.CFrame or monitor:GetPivot()
-                                    root.CFrame = pos * CFrame.new(0, 3, 0)
-                                    task.wait(0.2)
-                                    if fireproximityprompt then fireproximityprompt(p, 0) end
-                                    task.wait(0.3)
+                                -- 2. BƯỚC B: TELEPORT MÁY BÊN PHẢI (MONITOR) - XỬ LÝ KẾT QUẢ
+                                if monitor then
+                                    for _, p in pairs(monitor:GetChildren()) do
+                                        if p:IsA("ProximityPrompt") and p.Enabled then
+                                            Stats.CurrentStatus = "💻 2. Teleport tới Máy Bên Phải (Monitor) - Xử lý kết quả..."
+                                            root.CFrame = monitor:GetPivot() * CFrame.new(0, 3, 0)
+                                            task.wait(0.2)
+                                            if fireproximityprompt then fireproximityprompt(p, 0) end
+                                            task.wait(0.3)
+                                        end
+                                    end
+                                end
+
+                                -- 3. BƯỚC C: TELEPORT GIƯỜNG BỆNH - CHỮA TRỊ (APPLY TREATMENT)
+                                if bed then
+                                    local p = bed:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                    if p and p.Enabled then
+                                        Stats.CurrentStatus = "🩺 3. Teleport tới Giường Bệnh - Tiến hành chữa trị..."
+                                        root.CFrame = bed:IsA("BasePart") and bed.CFrame or bed:GetPivot() * CFrame.new(0, 3, 0)
+                                        task.wait(0.2)
+                                        if fireproximityprompt then
+                                            fireproximityprompt(p, 0)
+                                            Stats.PatientsHealed = Stats.PatientsHealed + 1
+                                        end
+                                        task.wait(0.4)
+                                    end
                                 end
                             end
                         end
                     end
-                end
-
-                -- BƯỚC A: Phân tích mẫu bệnh tại Analyzer các phòng khác
-                if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
-                    Stats.CurrentStatus = "🔬 Phân tích mẫu bệnh nhân tại Analyzer..."
-                    local pos = activeAnalyzerPrompt.Parent:IsA("BasePart") and activeAnalyzerPrompt.Parent.CFrame or activeAnalyzerPrompt.Parent:GetPivot()
-                    root.CFrame = pos * CFrame.new(0, 3, 0)
-                    task.wait(0.3)
-                    if fireproximityprompt then fireproximityprompt(activeAnalyzerPrompt, 0) end
-                    task.wait(0.3)
-                end
-
-                -- BƯỚC B: Xử lý kết quả tại Monitor
-                if activeMonitorPrompt and activeMonitorPrompt.Parent then
-                    Stats.CurrentStatus = "💻 Xử lý kết quả khám bệnh tại Monitor..."
-                    local pos = activeMonitorPrompt.Parent:IsA("BasePart") and activeMonitorPrompt.Parent.CFrame or activeMonitorPrompt.Parent:GetPivot()
-                    root.CFrame = pos * CFrame.new(0, 3, 0)
-                    task.wait(0.3)
-                    if fireproximityprompt then fireproximityprompt(activeMonitorPrompt, 0) end
-                    task.wait(0.3)
-                end
-
-                -- BƯỚC C: Chữa bệnh tại Giường
-                if activeBedPrompt and activeBedPrompt.Parent then
-                    Stats.CurrentStatus = "🩺 Teleport tới Giường phẫu thuật/chữa bệnh..."
-                    local pos = activeBedPrompt.Parent:IsA("BasePart") and activeBedPrompt.Parent.CFrame or activeBedPrompt.Parent:GetPivot()
-                    root.CFrame = pos * CFrame.new(0, 3, 0)
-                    task.wait(0.3)
-                    if fireproximityprompt then
-                        fireproximityprompt(activeBedPrompt, 0)
-                        Stats.PatientsHealed = Stats.PatientsHealed + 1
-                    end
-                    task.wait(0.5)
-                end
+                end)
 
             -- 📌 TRƯỜNG HỢP 3: CHƯA CÓ BỆNH NHÂN NÀO -> ĐỨNG TẠI BÀN TIẾP TÂN NGHỈ VÀ CHỜ
             else
