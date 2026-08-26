@@ -254,9 +254,9 @@ ClaimBtn.MouseButton1Click:Connect(function()
     ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
 end)
 
--- 🏥 3. LUỒNG QUY TRÌNH QUẢN LÝ BỆNH NHÂN THEO THỜI GIAN THỰC:
+-- 🏥 3. LUỒNG QUY TRÌNH QUẢN LÝ BỆNH NHÂN THEO THỜI GIAN THỰC (AUTO STAMP THE FORM & CHECK-IN):
 -- 1. ĐỨNG TẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN ĐẾN CỬA SỔ
--- 2. KHI BỆNH NHÂN ĐẾN -> DÒ PROXIMITY PROMPT / CHECK-IN -> TIẾP NHẬN / XỬ LÝ QUỶ
+-- 2. KHI BỆNH NHÂN ĐẾN -> TỰ ĐỘNG BẤM DẤU (STAMP THE FORM), CHỤP ẢNH, DÒ CHECK-IN & TIẾP NHẬN
 -- 3. CHỜ BỆNH NHÂN ĐI VÀO PHÒNG BỆNH -> CHUYỂN SANG PHÒNG KHÁM VÀ CHỮA BỆNH
 -- 4. QUAY TRỞ LẠI BÀN TIẾP TÂN CHỜ BỆNH NHÂN TIẾP THEO
 
@@ -269,20 +269,24 @@ local function handleMatchGameplay()
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then return end
 
-            -- 🔍 DÒ TÌM PROXIMITY PROMPT ĐANG HOẠT ĐỘNG
+            -- 🔍 DÒ TÌM TOÀN BỘ PROXIMITY PROMPT ĐANG HOẠT ĐỘNG IN-GAME
             local activeBedPrompt = nil
             local activeAnalyzerPrompt = nil
             local activeMonitorPrompt = nil
-            local activeCheckInPrompt = nil
+            local activeReceptionPrompts = {}
 
             for _, descendant in pairs(workspace:GetDescendants()) do
                 if descendant:IsA("ProximityPrompt") and descendant.Enabled then
                     local act = string.lower(descendant.ActionText or "")
                     local obj = string.lower(descendant.ObjectText or "")
+                    local name = string.lower(descendant.Name or "")
                     local parentName = string.lower(descendant.Parent and descendant.Parent.Name or "")
 
-                    if string.find(act, "check") or string.find(act, "reception") or string.find(act, "ring") or string.find(obj, "patient") or string.find(parentName, "bell") then
-                        activeCheckInPrompt = descendant
+                    -- 📋 Các nút Bàn Tiếp Tân (Stamp the form, Check-in, Ring Bell, Take photo, Inspect)
+                    local isReception = string.find(act, "stamp") or string.find(act, "check") or string.find(act, "ring") or string.find(act, "photo") or string.find(act, "form") or string.find(act, "inspect") or string.find(obj, "patient") or string.find(parentName, "bell") or string.find(parentName, "stamp") or string.find(name, "stamp")
+
+                    if isReception then
+                        table.insert(activeReceptionPrompts, descendant)
                     elseif string.find(act, "apply") then
                         activeBedPrompt = descendant
                     elseif string.find(act, "analyze") then
@@ -293,8 +297,33 @@ local function handleMatchGameplay()
                 end
             end
 
-            -- 📌 TRƯỜNG HỢP 1: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
-            if activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
+            -- 📌 TRƯỜNG HỢP 1: CÓ BỆNH NHÂN MỚI TỚI CỬA SỔ BÀN TIẾP TÂN (CÓ NÚT CHECK-IN / STAMP THE FORM)
+            if #activeReceptionPrompts > 0 then
+                Stats.CurrentStatus = "📋 1. Bệnh nhân đã tới - Tự đóng dấu (Stamp form) & Check-in..."
+                for _, prompt in ipairs(activeReceptionPrompts) do
+                    if prompt and prompt.Parent then
+                        local p = prompt.Parent
+                        local pos = p:IsA("BasePart") and p.CFrame or p:GetPivot()
+                        root.CFrame = pos * CFrame.new(0, 3, 0)
+                        task.wait(0.15)
+                        if fireproximityprompt then fireproximityprompt(prompt, 0) end
+                    end
+                end
+                task.wait(0.3)
+
+                -- Tiếp nhận bệnh nhân & Đóng dấu Form
+                local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
+                if dialogRemote then dialogRemote:FireServer(true) end
+
+                local stampRemote = Net:FindFirstChild("RE/StampForm") or Net:FindFirstChild("RE/Stamp")
+                if stampRemote then stampRemote:FireServer(true) end
+
+                -- Chờ bệnh nhân di chuyển vào phòng
+                Stats.CurrentStatus = "⏳ Đang chờ Bệnh Nhân đi vào Phòng Bệnh..."
+                task.wait(1.5)
+
+            -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN ĐANG CẦN PHẪU THUẬT / CHỮA TRỊ TRONG PHÒNG BỆNH
+            elseif activeBedPrompt or activeAnalyzerPrompt or activeMonitorPrompt then
                 -- BƯỚC A: Phân tích mẫu bệnh tại Analyzer
                 if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
                     Stats.CurrentStatus = "🔬 2. Phân tích mẫu bệnh nhân tại Analyzer..."
@@ -327,23 +356,6 @@ local function handleMatchGameplay()
                     end
                     task.wait(0.5)
                 end
-
-            -- 📌 TRƯỜNG HỢP 2: CÓ BỆNH NHÂN MỚI TỚI CỬA SỔ BÀN TIẾP TÂN
-            elseif activeCheckInPrompt and activeCheckInPrompt.Parent then
-                Stats.CurrentStatus = "📋 1. Bệnh nhân đã tới - Đang Check-in tại Bàn Tiếp Tân..."
-                local pos = activeCheckInPrompt.Parent:IsA("BasePart") and activeCheckInPrompt.Parent.CFrame or activeCheckInPrompt.Parent:GetPivot()
-                root.CFrame = pos * CFrame.new(0, 3, 0)
-                task.wait(0.3)
-                if fireproximityprompt then fireproximityprompt(activeCheckInPrompt, 0) end
-                task.wait(0.5)
-
-                -- Tiếp nhận bệnh nhân
-                local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
-                if dialogRemote then dialogRemote:FireServer(true) end
-
-                -- Chờ bệnh nhân di chuyển vào phòng
-                Stats.CurrentStatus = "⏳ Đang chờ Bệnh Nhân đi vào Phòng Bệnh..."
-                task.wait(2)
 
             -- 📌 TRƯỜNG HỢP 3: CHƯA CÓ BỆNH NHÂN NÀO -> ĐỨNG TẠI BÀN TIẾP TÂN NGHỈ VÀ CHỜ
             else
