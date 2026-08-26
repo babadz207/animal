@@ -254,66 +254,98 @@ ClaimBtn.MouseButton1Click:Connect(function()
     ClaimBtn.Text = "💎 Nhận Gems Sổ Sách Ngay"
 end)
 
--- 🏥 3. TELEPORT TRỰC TIẾP CHỮA BỆNH IN-MATCH (KHÔNG BAO GIỜ SPAM LỖI NHẶT THUỐC)
+-- 🏥 3. LUỒNG QUY TRÌNH CHƠI LẦN LƯỢT CHUẨN XÁC 100%:
+-- BƯỚC 1: Check-in tại Bàn Tiếp Tân -> Phân biệt Bệnh Nhân Thường hay Quỷ/Dị Thường
+-- BƯỚC 2: Phân tích mẫu bệnh tại Analyzer
+-- BƯỚC 3: Xử lý kết quả kiểm tra tại Monitor
+-- BƯỚC 4: Teleport tới Giường phẫu thuật/chữa bệnh (Apply Treatment)
 local function handleMatchGameplay()
     if game.PlaceId == 104522435597696 or string.find(string.lower(game.Name), "hospital") then
-        Stats.CurrentStatus = "⚡ Teleport chữa bệnh & lấy dụng cụ y tế..."
         pcall(function()
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            local bp = LocalPlayer:FindFirstChild("Backpack")
+            if not root then return end
 
-            -- Đếm chính xác số lượng Tool/Dụng cụ y tế đang cầm
-            local toolCount = 0
-            if bp then
-                for _, item in pairs(bp:GetChildren()) do
-                    if item:IsA("Tool") then toolCount = toolCount + 1 end
-                end
-            end
-            if char then
-                for _, item in pairs(char:GetChildren()) do
-                    if item:IsA("Tool") then toolCount = toolCount + 1 end
-                end
-            end
-
+            -- BƯỚC 1: CHẠY ĐẾN BÀN TIẾP TÂN DÒ CHECK-IN BỆNH NHÂN MỚI
+            local receptionPrompt = nil
             for _, descendant in pairs(workspace:GetDescendants()) do
                 if descendant:IsA("ProximityPrompt") and descendant.Enabled then
-                    local actText = string.lower(descendant.ActionText or "")
-                    local parentPath = string.lower(descendant.Parent and descendant.Parent:GetFullName() or "")
-
-                    -- Kiểm tra xem Prompt này là Nút Nhặt Thuốc hay Nút Chữa Bệnh
-                    local isMedicinePickup = string.find(parentPath, "medicine") or string.find(actText, "drops") or string.find(actText, "bandage") or string.find(actText, "medkit") or string.find(actText, "scalpel") or string.find(actText, "organ") or string.find(actText, "antibiotic") or string.find(actText, "scissors") or string.find(actText, "transplant")
-                    local isTreatmentAction = string.find(actText, "apply") or string.find(actText, "analyze") or string.find(actText, "process") or string.find(actText, "inspect") or string.find(actText, "print")
-
-                    -- CHỈ nhặt thuốc khi túi đồ ít hơn 2 món. Nếu túi đã có từ 2 món trở lên -> CHỈ tập trung chữa bệnh!
-                    if isMedicinePickup and toolCount >= 2 then
-                        -- Bỏ qua nút nhặt thuốc để tránh spam "you can't carry any more medicine"
-                    else
-                        local parentPart = descendant.Parent
-                        if parentPart and root then
-                            local targetPos = nil
-                            if parentPart:IsA("BasePart") then
-                                targetPos = parentPart.CFrame * CFrame.new(0, 3, 0)
-                            elseif parentPart:IsA("Model") then
-                                targetPos = parentPart:GetPivot() * CFrame.new(0, 3, 0)
-                            end
-
-                            if targetPos then
-                                root.CFrame = targetPos
-                                task.wait(0.02)
-                                if fireproximityprompt then
-                                    fireproximityprompt(descendant, 0)
-                                    if isTreatmentAction then
-                                        Stats.PatientsHealed = Stats.PatientsHealed + 1
-                                    end
-                                end
-                            end
-                        end
+                    local act = string.lower(descendant.ActionText or "")
+                    local obj = string.lower(descendant.ObjectText or "")
+                    if string.find(act, "check") or string.find(act, "reception") or string.find(obj, "patient") or string.find(act, "inspect") then
+                        receptionPrompt = descendant
+                        break
                     end
                 end
             end
 
-            Stats.CurrentStatus = "Đang tự giải Minigame Oxy & Nhịp Tim..."
+            if receptionPrompt and receptionPrompt.Parent then
+                Stats.CurrentStatus = "📋 BƯỚC 1: Đang Check-in Bệnh nhân tại Bàn Tiếp Tân..."
+                local pos = receptionPrompt.Parent:IsA("BasePart") and receptionPrompt.Parent.CFrame or receptionPrompt.Parent:GetPivot()
+                root.CFrame = pos * CFrame.new(0, 3, 0)
+                task.wait(0.2)
+                if fireproximityprompt then fireproximityprompt(receptionPrompt, 0) end
+                task.wait(0.4)
+
+                -- Tự động chấp nhận Bệnh Nhân Thường hoặc Xử Lý Quỷ (Skinwalker)
+                local dialogRemote = Net:FindFirstChild("RE/DialogDecision")
+                if dialogRemote then
+                    dialogRemote:FireServer(true)
+                end
+            end
+
+            -- BƯỚC 2: DÒ CÁC PHÒNG BỆNH ĐANG CÓ BỆNH NHÂN NẰM GIƯỜNG
+            local activeBedPrompt = nil
+            local activeAnalyzerPrompt = nil
+            local activeMonitorPrompt = nil
+
+            for _, descendant in pairs(workspace:GetDescendants()) do
+                if descendant:IsA("ProximityPrompt") and descendant.Enabled then
+                    local act = string.lower(descendant.ActionText or "")
+                    if string.find(act, "apply") then
+                        activeBedPrompt = descendant
+                    elseif string.find(act, "analyze") then
+                        activeAnalyzerPrompt = descendant
+                    elseif string.find(act, "process") then
+                        activeMonitorPrompt = descendant
+                    end
+                end
+            end
+
+            -- BƯỚC 2: KHÁM BỆNH & PHÂN TÍCH MẪU TẠI ANALYZER
+            if activeAnalyzerPrompt and activeAnalyzerPrompt.Parent then
+                Stats.CurrentStatus = "🔬 BƯỚC 2: Phân tích mẫu bệnh nhân tại Analyzer..."
+                local pos = activeAnalyzerPrompt.Parent:IsA("BasePart") and activeAnalyzerPrompt.Parent.CFrame or activeAnalyzerPrompt.Parent:GetPivot()
+                root.CFrame = pos * CFrame.new(0, 3, 0)
+                task.wait(0.2)
+                if fireproximityprompt then fireproximityprompt(activeAnalyzerPrompt, 0) end
+                task.wait(0.3)
+            end
+
+            -- BƯỚC 3: XỬ LÝ KẾT QUẢ TẠI MONITOR
+            if activeMonitorPrompt and activeMonitorPrompt.Parent then
+                Stats.CurrentStatus = "💻 BƯỚC 3: Xử lý kết quả khám bệnh tại Monitor..."
+                local pos = activeMonitorPrompt.Parent:IsA("BasePart") and activeMonitorPrompt.Parent.CFrame or activeMonitorPrompt.Parent:GetPivot()
+                root.CFrame = pos * CFrame.new(0, 3, 0)
+                task.wait(0.2)
+                if fireproximityprompt then fireproximityprompt(activeMonitorPrompt, 0) end
+                task.wait(0.3)
+            end
+
+            -- BƯỚC 4: CHỮA BỆNH TẠI GIƯỜNG (APPLY TREATMENT)
+            if activeBedPrompt and activeBedPrompt.Parent then
+                Stats.CurrentStatus = "🩺 BƯỚC 4: Teleport tới Giường phẫu thuật/chữa bệnh..."
+                local pos = activeBedPrompt.Parent:IsA("BasePart") and activeBedPrompt.Parent.CFrame or activeBedPrompt.Parent:GetPivot()
+                root.CFrame = pos * CFrame.new(0, 3, 0)
+                task.wait(0.2)
+                if fireproximityprompt then
+                    fireproximityprompt(activeBedPrompt, 0)
+                    Stats.PatientsHealed = Stats.PatientsHealed + 1
+                end
+                task.wait(0.4)
+            end
+
+            -- TỰ ĐỘNG GIẢI MINIGAME & THU PAY GEMS
             local hbRemote = Net:FindFirstChild("RE/HeartbeatMinigameComplete")
             local oxyRemote = Net:FindFirstChild("RE/OxygenPumpComplete")
             local payRemote = Net:FindFirstChild("RE/OxygenPumpPay")
@@ -322,6 +354,7 @@ local function handleMatchGameplay()
             if oxyRemote then oxyRemote:FireServer(true) end
             if payRemote then payRemote:FireServer() end
 
+            -- TỰ ĐỘNG DIỆT MA & DỊ THƯỜNG
             local ghostRemote = Net:FindFirstChild("RE/ScannerKillGhost")
             local extRemote = Net:FindFirstChild("RE/ExtinguisherBubbleHitGhost")
             if ghostRemote then ghostRemote:FireServer() end
