@@ -1071,7 +1071,7 @@ local function ProcessSmartCombat()
         local escapeUnit = (escapeDir.Magnitude > 0.1) and escapeDir.Unit or Vector3.new(1, 0, 0)
         State.CurrentStatus = "⚡ Đang lướt né vòng đỏ (Telegraph) của Boss!"
         hum.AutoRotate = true
-        hum:Move(escapeUnit, false)
+        hum:MoveTo(root.Position + escapeUnit * 8)
         return
     end
 
@@ -1120,6 +1120,12 @@ local function ProcessSmartCombat()
 
     local idealRange = isMage and (Config.CombatRangeMage or 15) or (Config.CombatRangeWarrior or 6)
     local minKiteDist = isMage and (Config.KiteDistanceMage or 10) or (Config.KiteDistanceWarrior or 4)
+
+    -- Khi máu thấp (< 35%): Tự động nới rộng cự ly kiting để bảo toàn mạng sống
+    if healthPercent < 0.35 then
+        idealRange = idealRange + 6
+        minKiteDist = minKiteDist + 6
+    end
 
     -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
     local horizontalDiff = Vector3.new(diff.X, 0, diff.Z)
@@ -1189,13 +1195,13 @@ local function ProcessSmartCombat()
             State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe): %s", targetMob.Name)
         end
 
-        hum:Move(chosenMoveDir, false)
+        hum:MoveTo(root.Position + chosenMoveDir * 6)
     else
         -- C. CỰ LY VÀNG (Sweet Spot): Giữ khoảng cách hoàn hảo & đảo bước chân nhẹ
         hum.AutoRotate = false
         local strafeDir = (strafeSign > 0) and leftDir or rightDir
         State.CurrentStatus = string.format("⚔️ Giữ cự ly vàng & xả đòn: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
-        hum:Move(strafeDir * 0.45, false)
+        hum:MoveTo(root.Position + strafeDir * 3)
     end
 
     -- 4. ĐÁNH THƯỜNG VỚI VŨ KHÍ (Khi trong tầm đánh)
@@ -1225,6 +1231,14 @@ local function ProcessDungeonReady()
     local readyGui = PlayerGui:FindFirstChild("readyGui") or PlayerGui:FindFirstChild("dungeonReady")
     if readyGui and readyGui.Enabled then
         local btn = readyGui:FindFirstChildWhichIsA("GuiButton", true)
+        if btn and btn.Visible then
+            ClickButton(btn)
+        end
+    end
+
+    local startBtnGui = PlayerGui:FindFirstChild("startButton")
+    if startBtnGui and startBtnGui.Enabled then
+        local btn = startBtnGui:FindFirstChildWhichIsA("GuiButton", true)
         if btn and btn.Visible then
             ClickButton(btn)
         end
