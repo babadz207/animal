@@ -494,13 +494,79 @@ local function IsRangedEnemy(mob)
     return name:find("archer") or name:find("mage") or name:find("wizard") or name:find("ranged") or name:find("caster") or name:find("skeleton") or name:find("shooter")
 end
 
+-- Tự động đổi giữa 2 Bộ Skill (Dual Skill Set Swap)
+local PathfindingService = game:GetService("PathfindingService")
+local lastSwapTime = 0
+
+local function SwapAbilitySet()
+    if os.clock() - lastSwapTime < 0.6 then return false end
+    lastSwapTime = os.clock()
+
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local swapBtn = abilitiesGui and abilitiesGui:FindFirstChild("Swap", true)
+    if swapBtn and swapBtn:IsA("GuiButton") then
+        ClickButton(swapBtn)
+        return true
+    end
+
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    if remotes and remotes:FindFirstChild("abilitySetSwapped") then
+        pcall(function() remotes.abilitySetSwapped:FireServer() end)
+        return true
+    end
+    return false
+end
+
+local function AreCurrentSkillsOnCooldown()
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    if not abilitiesGui then return false end
+
+    local leftCd = abilitiesGui:FindFirstChild("LeftAbility", true) and abilitiesGui.LeftAbility:FindFirstChild("cooldownNumber", true)
+    local rightCd = abilitiesGui:FindFirstChild("RightAbility", true) and abilitiesGui.RightAbility:FindFirstChild("cooldownNumber", true)
+
+    local leftInCd = leftCd and leftCd.Text ~= "" and tonumber(leftCd.Text) and tonumber(leftCd.Text) > 0
+    local rightInCd = rightCd and rightCd.Text ~= "" and tonumber(rightCd.Text) and tonumber(rightCd.Text) > 0
+
+    return (leftInCd and rightInCd)
+end
+
+-- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast)
+local function HasLineOfSight(fromPos, toPos, ignoreList)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = ignoreList or {}
+    
+    local dir = toPos - fromPos
+    local result = workspace:Raycast(fromPos, dir, rayParams)
+    return result == nil
+end
+
+-- Tính đường đi 3D NavMesh luồn lách qua hành lang khi bị tường che khuất
+local function GetDungeonWaypoints(startPos, endPos)
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2.5,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        WaypointSpacing = 4,
+    })
+    
+    local ok = pcall(function()
+        path:ComputeAsync(startPos, endPos)
+    end)
+    
+    if ok and path.Status == Enum.PathStatus.Success then
+        return path:GetWaypoints()
+    end
+    return nil
+end
+
 local function CastAllAbilities(isBoss, mobCount, healthPercent)
     if not Config.AutoSpamSkills then return end
 
     local char = LocalPlayer.Character
     if not char then return end
 
-    -- 1. ƯU TIÊN SỐ 1: NẾU MÁU < 75% VÀ CÓ CHIÊU HỒI MÁU THÌ PHẢI XẢ NGAY LẬP TỨC
+    -- 1. ƯU TIÊN SỐ 1: HỒI MÁU KHI MÁU < 75%
     if healthPercent < 0.75 then
         for _, tool in pairs(char:GetChildren()) do
             if tool:IsA("Tool") and IsHealingTool(tool) then
@@ -516,9 +582,7 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent)
         end
     end
 
-    -- 2. XẢ CÁC CHIÊU TẤN CÔNG:
-    -- Nếu đông quái (mobCount >= 2): xả AoE diện rộng
-    -- Nếu đánh Boss / Quái đơn: dồn toàn bộ sát thương đơn mục tiêu
+    -- 2. XẢ CHIÊU TẤN CÔNG BỘ HIỆN TẠI
     for _, tool in pairs(char:GetChildren()) do
         if tool:IsA("Tool") and not IsHealingTool(tool) then
             local shootEvent = tool:FindFirstChild("fireballShootEvent") or tool:FindFirstChild("spellEvent") or tool:FindFirstChild("abilityEvent")
@@ -541,6 +605,11 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent)
             remotes.abilityCast:FireServer(3)
         end)
     end
+
+    -- 3. NẾU 2 CHIÊU BỘ HIỆN TẠI ĐANG HỒI: TỰ ĐỘNG SWAP SANG BỘ THỨ 2 ĐỂ XẢ TIẾP
+    if AreCurrentSkillsOnCooldown() then
+        SwapAbilitySet()
+    end
 end
 
 local function ProcessSmartCombat()
@@ -551,6 +620,7 @@ local function ProcessSmartCombat()
 
     local root = GetRootPart()
     local hum = GetHumanoid()
+    local char = LocalPlayer.Character
     if not root or not hum or hum.Health <= 0 then return end
 
     local healthPercent = hum.Health / hum.MaxHealth
@@ -564,10 +634,7 @@ local function ProcessSmartCombat()
         end
     end
 
-    -- THỨ TỰ ƯU TIÊN MỤC TIÊU THÔNG MINH (TARGET PRIORITIZATION):
-    -- Vì ta bay trên không (13 studs), quái cận chiến hoàn toàn KHÔNG THỂ đánh trúng bạn.
-    -- Mối đe dọa duy nhất là: Quái Bắn Xa (Archer/Mage) và Boss!
-    -- 👉 Ưu tiên: Quái Bắn Xa > Boss > Quái Cận Chiến
+    -- Phân loại mục tiêu ưu tiên: Quái Bắn Xa > Boss > Cận Chiến
     local targetMob = nil
     local shortestDist = math.huge
     local livingMobs = 0
@@ -595,7 +662,6 @@ local function ProcessSmartCombat()
 
     State.EnemiesRemaining = livingMobs
 
-    -- Chọn mục tiêu theo ưu tiên
     local selectedCategory = (#rangedList > 0 and rangedList) or (#bossList > 0 and bossList) or meleeList
     if selectedCategory == rangedList then isRangedTarget = true end
     if selectedCategory == bossList then isBossTarget = true end
@@ -616,18 +682,32 @@ local function ProcessSmartCombat()
         if mobRoot then
             local targetHeight = Config.SafeHoverHeight
 
+            -- Kiểm tra xem có tường đá / cửa ngăn cách không (Line of Sight)
+            local hasLoS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
+
+            if not hasLoS and (root.Position - mobRoot.Position).Magnitude > 25 then
+                -- Bị tường che: Sử dụng 3D NavMesh Pathfinding tìm đường qua hành lang
+                State.CurrentStatus = "🧭 Đang luồn qua hành lang đến phòng quái (Pathfinding)..."
+                local waypoints = GetDungeonWaypoints(root.Position, mobRoot.Position)
+                if waypoints and #waypoints > 1 then
+                    local nextPoint = waypoints[2].Position + Vector3.new(0, targetHeight, 0)
+                    root.CFrame = CFrame.new(nextPoint, mobRoot.Position)
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    return
+                end
+            end
+
+            -- Khi đã có tầm nhìn rõ ràng:
             if inDanger then
-                -- Boss đang vận chiêu diện rộng: lướt an toàn
                 targetHeight = Config.SafeHoverHeight + 6
                 State.CurrentStatus = "🛡️ Đang né chiêu diện rộng của Boss!"
                 root.AssemblyLinearVelocity = Vector3.new(16, 0, 16)
             elseif healthPercent < 0.35 then
-                -- Game không tự hồi máu: giữ khoảng cách xa hơn và dồn dame nhanh kết liễu quái
                 targetHeight = Config.SafeHoverHeight + 6
-                State.CurrentStatus = string.format("⚡ Máu yếu (%.0f%%)! Đang giữ khoảng cách & xả skill hồi máu/dứt điểm!", healthPercent * 100)
+                State.CurrentStatus = string.format("⚡ Máu yếu (%.0f%%)! Đang giữ khoảng cách & xả skill dứt điểm!", healthPercent * 100)
             else
                 local targetType = isRangedTarget and "Quái Bắn Xa" or (isBossTarget and "BOSS" or "Quái Cận Chiến")
-                State.CurrentStatus = string.format("⚔️ Diệt %s: %s (Khoảng cách: %dm)", targetType, targetMob.Name, math.floor(shortestDist))
+                State.CurrentStatus = string.format("⚔️ Diệt %s: %s (Cách: %dm)", targetType, targetMob.Name, math.floor(shortestDist))
             end
 
             -- Giữ độ cao an toàn trên đầu quái
@@ -635,11 +715,11 @@ local function ProcessSmartCombat()
             root.CFrame = CFrame.new(safePos, mobRoot.Position)
             root.AssemblyLinearVelocity = Vector3.zero
 
-            -- Xả chiêu thức thông minh (Ưu tiên hồi máu nếu cần)
+            -- Xả chiêu thức thông minh (Tự đổi 2 bộ skill khi hồi chiêu)
             CastAllAbilities(isBossTarget, livingMobs, healthPercent)
         end
     end
-    end
+end
 end
 
 --------------------------------------------------------------------------------
