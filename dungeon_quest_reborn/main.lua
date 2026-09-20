@@ -1284,10 +1284,10 @@ local SKILL_RANGE_PROFILES = {
     },
     Ranged = {
         name = "Phép thuật / Đòn tầm xa",
-        minSafe = 14.0,      -- Quái cận chiến hoàn toàn bất lực không thể tới gần.
-        maxCast = 22.0,      -- Tầm bắn chuẩn xác.
-        preferred = 17.0,    -- Cự ly vàng tầm xa.
-        emergencyDodge = 9.5,
+        minSafe = 12.0,      -- Quái cận chiến hoàn toàn bất lực không thể tới gần.
+        maxCast = 18.5,      -- Tầm bắn chuẩn xác, giúp đòn phép bay nhanh trúng 100% không bị quái né.
+        preferred = 14.5,    -- Cự ly vàng tầm xa lý tưởng.
+        emergencyDodge = 8.5,
         isRanged = true,
         isHeal = false,
     },
@@ -1783,7 +1783,7 @@ local function GetAllDungeonEnemies()
 end
 
 local lastAbilityCastTime = 0
-local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, skillsDebug)
+local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, skillsDebug, targetMob, targetPos, isTargetVis)
     if not Config.AutoSpamSkills then return end
     local now = os.clock()
     if now - lastAbilityCastTime < 0.15 then return end
@@ -1797,8 +1797,8 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
 
     -- 1. KIỂM TRA ĐIỀU KIỆN XẢ TỪNG CHIÊU Q VÀ E RIÊNG BIỆT
-    -- CHỈ XẢ KHI QUÁI NẰM TRONG TẦM HIỆU LỰC (MAXCAST) CỦA CHIÊU ĐÓ!
-    -- Không trong tầm thì TUYỆT ĐỐI KHÔNG XẢ CHIÊU!
+    -- CHỈ XẢ KHI QUÁI NẰM TRONG TẦM HIỆU LỰC (MAXCAST) CỦA CHIÊU ĐÓ & CÓ TẦM NHÌN TRỰC TIẾP!
+    -- Bị tường che khuất thì TUYỆT ĐỐI KHÔNG XẢ CHIÊU SÁT THƯƠNG VÀO TƯỜNG!
     local canCastQ = false
     local canCastE = false
 
@@ -1807,8 +1807,8 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
         if qRange.isHeal then
             canCastQ = (healthPercent < 0.75)
         else
-            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh của chiêu Q
-            if targetDist and qRange.maxCast and targetDist <= (qRange.maxCast + 0.5) then
+            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh và KHÔNG bị tường chắn
+            if (isTargetVis ~= false) and targetDist and qRange.maxCast and targetDist <= (qRange.maxCast + 0.5) then
                 canCastQ = true
             end
         end
@@ -1819,10 +1819,26 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
         if eRange.isHeal then
             canCastE = (healthPercent < 0.75)
         else
-            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh của chiêu E
-            if targetDist and eRange.maxCast and targetDist <= (eRange.maxCast + 0.5) then
+            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh và KHÔNG bị tường chắn
+            if (isTargetVis ~= false) and targetDist and eRange.maxCast and targetDist <= (eRange.maxCast + 0.5) then
                 canCastE = true
             end
+        end
+    end
+
+    -- ĐỒNG BỘ GÓC NHÌN & HƯỚNG MẶT NGAY TRƯỚC KHI BẮN CHIÊU (AIM LOCK 100%)
+    local root = GetRootPart()
+    local aimTargetPos = targetPos or (targetMob and (targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")) and (targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")).Position)
+    if root and aimTargetPos then
+        local lookAt = Vector3.new(aimTargetPos.X, root.Position.Y, aimTargetPos.Z)
+        if (lookAt - root.Position).Magnitude > 0.1 then
+            root.CFrame = CFrame.lookAt(root.Position, lookAt)
+        end
+        local cam = workspace.CurrentCamera
+        if cam then
+            pcall(function()
+                cam.CFrame = CFrame.lookAt(cam.CFrame.Position, aimTargetPos + Vector3.new(0, 1.2, 0))
+            end)
         end
     end
 
@@ -1841,7 +1857,7 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
                     local rProf = CalculateSkillRange(tool.Name, tool)
                     if rProf.isHeal then
                         toolCanCast = (healthPercent < 0.75)
-                    elseif targetDist and rProf.maxCast and targetDist <= (rProf.maxCast + 0.5) then
+                    elseif (isTargetVis ~= false) and targetDist and rProf.maxCast and targetDist <= (rProf.maxCast + 0.5) then
                         toolCanCast = true
                     end
                 end
@@ -1849,7 +1865,11 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
                 if toolCanCast then
                     local localEvt = tool:FindFirstChild("localEvent")
                     if localEvt and localEvt:IsA("BindableEvent") then
-                        pcall(function() localEvt:Fire() end)
+                        if aimTargetPos then
+                            pcall(function() localEvt:Fire(aimTargetPos) end)
+                        else
+                            pcall(function() localEvt:Fire() end)
+                        end
                     end
                 end
             end
@@ -1860,14 +1880,22 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
     if canCastQ and skillsDebug and skillsDebug.q then
         if leftBtn then ClickButton(leftBtn) end
         if remotes and remotes:FindFirstChild("abilityCast") then
-            pcall(function() remotes.abilityCast:FireServer(1) end)
+            if aimTargetPos then
+                pcall(function() remotes.abilityCast:FireServer(1, aimTargetPos) end)
+            else
+                pcall(function() remotes.abilityCast:FireServer(1) end)
+            end
         end
     end
 
     if canCastE and skillsDebug and skillsDebug.e then
         if rightBtn then ClickButton(rightBtn) end
         if remotes and remotes:FindFirstChild("abilityCast") then
-            pcall(function() remotes.abilityCast:FireServer(2) end)
+            if aimTargetPos then
+                pcall(function() remotes.abilityCast:FireServer(2, aimTargetPos) end)
+            else
+                pcall(function() remotes.abilityCast:FireServer(2) end)
+            end
         end
     end
 
@@ -2058,13 +2086,22 @@ local function ProcessSmartCombat()
         return
     end
 
-    -- Khi trong phạm vi giao chiến và có tầm nhìn trực tiếp: Xoay mặt nhìn thẳng vào quái vật
-    -- (Chỉ ép CFrame khi đứng yên xả đòn; khi đang di chuyển lùi/né thì để Humanoid tự xoay chạy hết tốc độ)
-    if isTargetVis and dist <= safeMaxDist and hum.MoveDirection.Magnitude < 0.1 then
+    -- HỆ THỐNG KHÓA HƯỚNG TẤN CÔNG (AIM LOCK & STRAFE COMBAT):
+    -- Trong tầm chiến đấu, tắt AutoRotate và liên tục ép CFrame nhìn thẳng vào quái vật!
+    -- Giúp nhân vật vừa đi lùi vừa né đòn (backpedal) hoặc né ngang (strafe) nhưng MẶT, VŨ KHÍ & PHÉP LUÔN HƯỚNG 100% VÀO QUÁI!
+    -- Triệt tiêu hoàn toàn hiện tượng ném chiêu bị hụt do quay lưng hoặc quay ngang người!
+    if isTargetVis and dist <= (safeMaxDist + 6) then
+        hum.AutoRotate = false
         local lookAtTarget = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
         local toMob = (lookAtTarget - root.Position)
         if toMob.Magnitude > 0.1 then
             root.CFrame = CFrame.lookAt(root.Position, lookAtTarget)
+        end
+        local cam = workspace.CurrentCamera
+        if cam then
+            pcall(function()
+                cam.CFrame = CFrame.lookAt(cam.CFrame.Position, mobRoot.Position + Vector3.new(0, 1.2, 0))
+            end)
         end
     else
         hum.AutoRotate = true
@@ -2153,14 +2190,17 @@ local function ProcessSmartCombat()
         hum:MoveTo(root.Position + dodgeDir * 3)
     end
 
-    -- 5. ĐÁNH THƯỜNG VỚI VŨ KHÍ
-    local weaponAttackRange = (combatProfile.isRanged or GetEquippedWeaponRange().isRanged) and 24 or 8.5
+    -- 5. ĐÁNH THƯỜNG VÀ XẢ SKILL (CÓ DỰ ĐOÁN ĐÓN ĐẦU QUÁI DI CHUYỂN)
+    local mobVel = mobRoot.AssemblyLinearVelocity or Vector3.zero
+    local aimPos = mobRoot.Position + mobVel * 0.12
+
+    local weaponAttackRange = (combatProfile.isRanged or GetEquippedWeaponRange().isRanged) and 20 or 8.5
     if dist <= weaponAttackRange then
-        AttackWithWeapon(mobRoot.Position)
+        AttackWithWeapon(aimPos)
     end
 
-    -- 6. XẢ SKILL THÔNG MINH (Chỉ xả khi quái nằm TRONG TẦM HIỆU LỰC của từng chiêu!)
-    CastAllAbilities(isBossTarget, livingMobs, healthPercent, dist, skillsDebug)
+    -- 6. XẢ SKILL THÔNG MINH (Khóa hướng chuẩn xác, đón đầu quái di chuyển, chỉ xả khi trong tầm và có tầm nhìn!)
+    CastAllAbilities(isBossTarget, livingMobs, healthPercent, dist, skillsDebug, targetMob, aimPos, isTargetVis)
 end
 
 --------------------------------------------------------------------------------
