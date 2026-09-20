@@ -533,7 +533,27 @@ local function ProcessAutoEquip()
     local playerLvl = GetPlayerLevel()
     local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
     local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
-    local isMage = (sp >= pp)
+    local equippedWeaponVal = LocalPlayer:FindFirstChild("weaponEquipped") and LocalPlayer.weaponEquipped.Value:lower() or ""
+    local isMageWeapon = equippedWeaponVal:find("wand") or equippedWeaponVal:find("staff") or equippedWeaponVal:find("orb")
+    local isWarriorWeapon = equippedWeaponVal:find("sword") or equippedWeaponVal:find("blade") or equippedWeaponVal:find("dagger")
+        or equippedWeaponVal:find("axe") or equippedWeaponVal:find("hammer") or equippedWeaponVal:find("mace") or equippedWeaponVal:find("scythe")
+
+    local isMage = false
+    if Config.StatBuild == "Mage" then
+        isMage = true
+    elseif Config.StatBuild == "Warrior" then
+        isMage = false
+    else
+        if isMageWeapon then
+            isMage = true
+        elseif isWarriorWeapon then
+            isMage = false
+        elseif sp > pp then
+            isMage = true
+        else
+            isMage = false -- Mặc định của tân thủ Dungeon Quest luôn là Chiến Binh (Warrior)
+        end
+    end
 
     -- A. TỰ ĐỘNG TRANG BỊ VŨ KHÍ MẠNH NHẤT
     if invData.weapons then
@@ -630,47 +650,142 @@ local function ProcessAutoEquip()
         end
     end
 
-    -- D. TỰ ĐỘNG TRANG BỊ KỸ NĂNG (ABILITIES) VÀO Q, E, Q2, E2
+    -- D. TỰ ĐỘNG TRANG BỊ KỸ NĂNG (ABILITIES) THÔNG MINH - CHUẨN COMBO RPG
     if invData.abilities then
-        local sortedAbilities = {}
+        local rawAbilities = {}
         for key, item in pairs(invData.abilities) do
             if type(item) == "table" and (tonumber(item.levelReq) or 1) <= playerLvl then
                 local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+                local name = tostring(item.name or "Ability")
+                local nameLower = name:lower()
                 local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
-                local power = (tonumber(item.spellPower) or 0) + (tonumber(item.physicalDamage) or 0)
-                local isHeal = IsHealingTool and IsHealingTool(item)
-                local name = tostring(item.name or ""):lower()
-                local isRanged = name:find("fireball") or name:find("orb") or name:find("beam") or name:find("bolt") or name:find("blast") or name:find("missile")
+                local physDmg = tonumber(item.physicalDamage) or 0
+                local spellPwr = tonumber(item.spellPower) or 0
+                local upgrade = tonumber(item.currentUpgrade) or 0
 
-                -- Ưu tiên kỹ năng: Hồi máu > Phép tầm xa cho Mage > Sát thương
-                local score = power * 5 + rScore * 10
-                if isHeal then score = score + 2000 end
-                if isRanged and isMage then score = score + 1000 end
+                -- 1. Nhận diện loại kỹ năng: Hồi máu, Cận chiến/Vật lý, hay Phép thuật
+                local healKeywords = {"heal", "rejuvenat", "aura of life", "redemption", "inner sanctum", "holy circle", "holy barrier", "innervate", "blessing", "life pulse"}
+                local isHeal = false
+                for _, kw in ipairs(healKeywords) do
+                    if nameLower:find(kw) then isHeal = true break end
+                end
 
-                table.insert(sortedAbilities, {
+                local meleeKeywords = {"whirlwind", "strike", "slash", "slam", "stomp", "cleave", "spin", "smash", "leap", "blade", "gale", "quake", "tremor", "bash", "barrage"}
+                local isMelee = false
+                for _, kw in ipairs(meleeKeywords) do
+                    if nameLower:find(kw) then isMelee = true break end
+                end
+                if physDmg > 0 then isMelee = true end
+
+                local spellKeywords = {"fireball", "flame", "orb", "beam", "bolt", "blast", "ice", "lightning", "missile", "wave", "meteor", "storm", "nova"}
+                local isSpell = false
+                for _, kw in ipairs(spellKeywords) do
+                    if nameLower:find(kw) then isSpell = true break end
+                end
+                if spellPwr > 0 then isSpell = true end
+
+                -- 2. Tính điểm độ mạnh và mức độ ăn khớp với Class (Class Synergy)
+                local baseScore = rScore * 20 + upgrade * 5
+                if isMage then
+                    baseScore = baseScore + spellPwr * 4 + (isSpell and 1500 or 0)
+                else
+                    baseScore = baseScore + physDmg * 4 + (isMelee and 1500 or 0)
+                end
+                -- Chiêu hồi máu cực kỳ giá trị để sinh tồn trong Dungeon
+                if isHeal then
+                    baseScore = baseScore + 2000
+                end
+
+                -- Làm sạch tên kỹ năng để lọc trùng chính xác (loại bỏ hậu tố level / nâng cấp)
+                local baseCleanName = nameLower:gsub("%s*%(.*%)", ""):gsub("%s*[%+%-]%d+", ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
+
+                table.insert(rawAbilities, {
                     num = num,
-                    name = item.name,
-                    score = score,
-                    isRanged = isRanged,
+                    name = name,
+                    baseName = baseCleanName,
+                    score = baseScore,
                     isHeal = isHeal,
+                    isMelee = isMelee,
+                    isSpell = isSpell,
+                    rarityScore = rScore,
                     equipped = item.equipped or {},
                 })
             end
         end
-        table.sort(sortedAbilities, function(a, b) return a.score > b.score end)
 
-        local slots = {"e", "q", "e2", "q2"}
+        -- 3. LỌC TRÙNG KỸ NĂNG: Chỉ giữ lại 1 cuốn MẠNH NHẤT cho mỗi tên chiêu thức!
+        local bestByBaseName = {}
+        for _, ab in ipairs(rawAbilities) do
+            local bName = ab.baseName
+            if not bestByBaseName[bName] or ab.score > bestByBaseName[bName].score then
+                bestByBaseName[bName] = ab
+            end
+        end
+
+        local uniqueAbilities = {}
+        for _, ab in pairs(bestByBaseName) do
+            table.insert(uniqueAbilities, ab)
+        end
+        table.sort(uniqueAbilities, function(a, b) return a.score > b.score end)
+
+        -- 4. PHÂN TÁCH VAI TRÒ: SÁT THƯƠNG & HỒI MÁU
+        local healSkill = nil
+        local damageSkills = {}
+        for _, ab in ipairs(uniqueAbilities) do
+            if ab.isHeal and not healSkill then
+                healSkill = ab
+            else
+                table.insert(damageSkills, ab)
+            end
+        end
+
+        -- 5. THIẾT LẬP COMBO THÔNG MINH CHO CẢ 2 BỘ (SET 1: Q, E | SET 2: Q2, E2)
+        -- Tuyệt đối KHÔNG BAO GIỜ trang bị 2 chiêu trùng nhau vào Q và E của cùng một bộ!
+        local targetSlots = {}
+
+        if #damageSkills >= 1 then
+            targetSlots["q"] = damageSkills[1] -- Chiêu sát thương chủ lực (Ví dụ: Whirlwind)
+        elseif healSkill then
+            targetSlots["q"] = healSkill
+        end
+
+        if healSkill then
+            -- Nếu có chiêu hồi máu: Gán vào slot E của Set 1 (Combo: 1 Sát thương + 1 Hồi máu)
+            targetSlots["e"] = healSkill
+        elseif #damageSkills >= 2 then
+            -- Nếu không có hồi máu: Gán chiêu sát thương thứ 2 KHÁC NHAU vào E (Combo 2 chiêu độc lập)
+            targetSlots["e"] = damageSkills[2]
+        end
+
+        -- Thiết lập Set 2 (Dự phòng / Kỹ năng thay thế)
+        if #damageSkills >= 3 then
+            targetSlots["q2"] = damageSkills[3]
+        elseif #damageSkills >= 2 and targetSlots["e"] == healSkill then
+            targetSlots["q2"] = damageSkills[2]
+        elseif damageSkills[1] then
+            targetSlots["q2"] = damageSkills[1]
+        end
+
+        if #damageSkills >= 4 then
+            targetSlots["e2"] = damageSkills[4]
+        elseif healSkill and targetSlots["e"] ~= healSkill then
+            targetSlots["e2"] = healSkill
+        elseif #damageSkills >= 2 and targetSlots["q2"] ~= damageSkills[2] then
+            targetSlots["e2"] = damageSkills[2]
+        elseif damageSkills[1] and targetSlots["q2"] ~= damageSkills[1] then
+            targetSlots["e2"] = damageSkills[1]
+        end
+
+        -- 6. GỬI REMOTE TRANG BỊ CHÍNH XÁC VÀO TỪNG SLOT
         local unequipRemote = remotes and remotes:FindFirstChild("unequipItem")
-
-        for idx, slotName in ipairs(slots) do
-            local ab = sortedAbilities[idx]
+        for slotName, ab in pairs(targetSlots) do
             if ab and ab.num then
                 local isAlreadyInSlot = false
                 if type(ab.equipped) == "table" then
                     isAlreadyInSlot = (ab.equipped[slotName] == true)
                 end
+
                 if not isAlreadyInSlot then
-                    -- Nếu đang ở slot khác, unequip trước để tránh bị game chặn không cho gán slot mới
                     if unequipRemote and type(ab.equipped) == "table" then
                         for s, isEq in pairs(ab.equipped) do
                             if isEq == true and s ~= slotName then
