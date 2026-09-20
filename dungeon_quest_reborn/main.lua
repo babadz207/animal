@@ -1966,11 +1966,17 @@ local function ProcessSmartCombat()
     local preferredDist = combatProfile.preferred or 7.5
     local emergencyDodgeDist = combatProfile.emergencyDodge or 5.6
 
-    -- Khi máu thấp (< 40%): Lùi thêm 4 studs an toàn để hồi phục
-    if healthPercent < 0.4 then
+    -- Khi máu thấp: Tự động lùi sâu & mở rộng cự ly né tránh khẩn cấp (Emergency Distance Buffer)
+    if healthPercent < 0.25 then
+        safeMinDist = safeMinDist + 7
+        safeMaxDist = safeMaxDist + 5
+        preferredDist = preferredDist + 6
+        emergencyDodgeDist = emergencyDodgeDist + 3
+    elseif healthPercent < 0.45 then
         safeMinDist = safeMinDist + 4
         safeMaxDist = safeMaxDist + 4
         preferredDist = preferredDist + 4
+        emergencyDodgeDist = emergencyDodgeDist + 1.5
     end
 
     -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
