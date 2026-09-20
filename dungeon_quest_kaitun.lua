@@ -18,7 +18,7 @@ local function ResolveLatestCommit()
             return data.sha
         end
     end
-    return "9a6fff8"
+    return "46a1746"
 end
 
 local ref = ResolveLatestCommit()
