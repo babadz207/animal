@@ -19,8 +19,13 @@ if success and connectorCode then
     print("[Roblox-MCP] Tải connector thành công! Đang kết nối tới " .. tostring(getgenv().BridgeURL) .. "...")
     local fn, err = loadstring(connectorCode)
     if fn then
-        task.spawn(fn)
-        print("[Roblox-MCP] Đã khởi chạy connector thành công!")
+        task.spawn(function()
+            local ok, runErr = pcall(fn)
+            if not ok then
+                warn("[Roblox-MCP] Lỗi thực thi connector: " .. tostring(runErr))
+            end
+        end)
+        print("[Roblox-MCP] Đã khởi chạy connector thread!")
     else
         warn("[Roblox-MCP] Lỗi biên dịch connector: " .. tostring(err))
     end

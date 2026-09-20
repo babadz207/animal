@@ -312,24 +312,35 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
     function WebSocketBridge.new()
         local self = setmetatable({}, WebSocketBridge)
     
-        --// Connect directly to WebSocket \\--
+        local candidates = {}
+        if BridgeURL and BridgeURL ~= "" then table.insert(candidates, BridgeURL) end
+        for _, ip in ipairs({"10.0.2.2:16384", "192.168.1.118:16384", "192.168.1.117:16384", "127.0.0.1:16384"}) do
+            if not table.find(candidates, ip) then table.insert(candidates, ip) end
+        end
+
         local wsConnection = nil
+        local connectedUrl = nil
         local lastError = ""
-        for attempt = 1, 6 do
+
+        for _, targetUrl in ipairs(candidates) do
+            print("[Roblox-MCP] Đang thử kết nối WebSocket tới ws://" .. targetUrl .. " ...")
             local success, result = pcall(function()
-                return WebSocket.connect("ws://" .. BridgeURL)
+                return WebSocket.connect("ws://" .. targetUrl)
             end)
             if success and result then
                 wsConnection = result
+                connectedUrl = targetUrl
+                BridgeURL = targetUrl
+                getgenv().BridgeURL = targetUrl
                 break
             else
                 lastError = tostring(result)
             end
-            task.wait(0.5)
+            task.wait(0.2)
         end
         
         if wsConnection == nil then
-            error("WebSocket connection failed to ws://" .. BridgeURL .. ": " .. tostring(lastError))
+            error("Không thể kết nối WebSocket tới các địa chỉ: " .. table.concat(candidates, ", ") .. " | Lỗi cuối: " .. tostring(lastError))
         end
         
         self.WebSocket = wsConnection
@@ -337,7 +348,7 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
         self.Callbacks = {}
         self.ClientId = nil
 
-        print("[Roblox-MCP] WebSocket connected to ws://" .. BridgeURL .. "! Registering client...")
+        print("[Roblox-MCP]  ĐÃ KẾT NỐI THÀNH CÔNG TỚI: ws://" .. connectedUrl .. "!")
 
         --// Send registration \\--
         self.WebSocket:Send(HttpService:JSONEncode(GetRegistrationInfo()))
