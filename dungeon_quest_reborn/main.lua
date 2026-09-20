@@ -1294,14 +1294,48 @@ local function GetRaycastIgnoreList()
     local vfx = workspace:FindFirstChild("vfxPool") or workspace:FindFirstChild("abilities")
     if vfx then table.insert(ignore, vfx) end
 
+    local drops = workspace:FindFirstChild("drops") or workspace:FindFirstChild("debris")
+    if drops then table.insert(ignore, drops) end
+
     return ignore
 end
 
--- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast chống kẹt tường)
--- Quét tia từ ngực người chơi tới ngực mục tiêu, bỏ qua các part tàng hình/hiệu ứng/không va chạm
-local function IsTargetVisible(fromPos, toPos, extraIgnore)
-    local currentFrom = fromPos + Vector3.new(0, 2, 0)
-    local currentTo = toPos + Vector3.new(0, 2, 0)
+-- Hàm nhận diện chướng ngại vật vật lý hoặc kiến trúc tường/cột trong map Dungeon
+local function IsSolidObstruction(part)
+    if not part or not part:IsA("BasePart") then return false end
+
+    -- 1. Part có CanCollide = true: Bất kể tàng hình hay nhìn thấy được, nó đều là tường/barrier cản bước người chơi
+    if part.CanCollide then
+        return true
+    end
+
+    -- 2. Part là chi tiết tường/cột/kiến trúc trực quan (CanCollide = false nhưng che khuất tầm nhìn và đòn đánh)
+    if part.Transparency < 0.8 then
+        local nameLower = part.Name:lower()
+        if nameLower:find("wall") or nameLower:find("col") or nameLower:find("pillar")
+           or nameLower:find("door") or nameLower:find("gate") or nameLower:find("arch")
+           or nameLower:find("room") or nameLower:find("prop") or nameLower:find("rock")
+           or nameLower:find("statue") or nameLower:find("temple") or nameLower:find("stone") then
+            return true
+        end
+
+        -- Nếu kích thước lớn và không phải là hiệu ứng kỹ năng / hạt bụi
+        if part.Size.X > 2 or part.Size.Y > 2 or part.Size.Z > 2 then
+            if not (nameLower:find("effect") or nameLower:find("vfx") or nameLower:find("hitbox")
+               or nameLower:find("ball") or nameLower:find("spell") or nameLower:find("beam")
+               or nameLower:find("particle") or nameLower:find("aura")) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+-- Quét tia ở một độ cao nhất định, bỏ qua các part hiệu ứng/trigger xuyên qua được
+local function CastCheckRay(fromPos, toPos, yOffset, extraIgnore)
+    local currentFrom = fromPos + Vector3.new(0, yOffset, 0)
+    local currentTo = toPos + Vector3.new(0, yOffset, 0)
     local dir = currentTo - currentFrom
     local totalDist = dir.Magnitude
     if totalDist < 0.5 then return true end
@@ -1318,21 +1352,19 @@ local function IsTargetVisible(fromPos, toPos, extraIgnore)
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-    -- Cho phép quét xuyên qua tối đa 6 part không va chạm / hiệu ứng (như genericNeonBall, triggers)
-    for _ = 1, 6 do
+    for _ = 1, 8 do
         rayParams.FilterDescendantsInstances = ignoreList
         local hit = workspace:Raycast(currentFrom, dir, rayParams)
         if not hit then
-            return true -- Thông thoáng, nhìn thấy trực tiếp!
+            return true -- Thông thoáng, không chạm gì
         end
 
         local part = hit.Instance
-        -- Nếu chạm vào tường cứng, cột, sàn (CanCollide = true và không tàng hình)
-        if part.CanCollide and part.Transparency < 0.9 then
-            return false, part, hit.Distance -- Bị tường / chướng ngại vật che khuất!
+        if IsSolidObstruction(part) then
+            return false, part, hit.Distance -- Có vật cản!
         end
 
-        -- Part vô hình, trigger, genericNeonBall, effect không có va chạm -> Bỏ qua và quét tiếp
+        -- Part xuyên qua được (trigger / effect nhỏ) -> Thêm vào danh sách bỏ qua và quét tiếp
         table.insert(ignoreList, part)
         currentFrom = hit.Position + dir.Unit * 0.2
         dir = currentTo - currentFrom
@@ -1344,30 +1376,48 @@ local function IsTargetVisible(fromPos, toPos, extraIgnore)
     return false
 end
 
+-- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast chống kẹt tường 2 tầng: Ngang eo & Ngang ngực)
+local function IsTargetVisible(fromPos, toPos, extraIgnore)
+    -- Tầng 1: Ngang eo (+1.0 stud) - Bắt gờ tường thấp, bục bệ, rào chắn
+    local waistClear = CastCheckRay(fromPos, toPos, 1.0, extraIgnore)
+    if not waistClear then return false end
+
+    -- Tầng 2: Ngang ngực (+2.2 studs) - Bắt tường, cột, xà ngang và mép cửa
+    local chestClear = CastCheckRay(fromPos, toPos, 2.2, extraIgnore)
+    if not chestClear then return false end
+
+    return true
+end
+
 -- Tương thích ngược với các lệnh gọi HasLineOfSight cũ
 local function HasLineOfSight(fromPos, toPos, ignoreList)
     return IsTargetVisible(fromPos, toPos, ignoreList)
 end
 
--- Kiểm tra vật cản (tường, cột) theo một hướng để né khi đi lùi
+-- Kiểm tra vật cản (tường, cột) theo một hướng để né khi di chuyển / đi lùi
 local function CheckDirectionClear(fromPos, dir, distance)
-    local checkFrom = fromPos + Vector3.new(0, 1.5, 0)
+    local checkFrom = fromPos + Vector3.new(0, 1.2, 0)
     local checkDir = dir.Unit * distance
     local ignoreList = GetRaycastIgnoreList()
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-    for _ = 1, 4 do
+    for _ = 1, 6 do
         rayParams.FilterDescendantsInstances = ignoreList
         local hit = workspace:Raycast(checkFrom, checkDir, rayParams)
         if not hit then
             return true, distance
         end
         local part = hit.Instance
-        if part.CanCollide and part.Transparency < 0.9 then
-            return false, hit.Distance -- Có tường cản trở ở khoảng cách hit.Distance
+        if IsSolidObstruction(part) then
+            return false, hit.Distance -- Có tường/cột cản trở ở khoảng cách hit.Distance
         end
         table.insert(ignoreList, part)
+        checkFrom = hit.Position + dir.Unit * 0.2
+        checkDir = dir.Unit * math.max(0, distance - (hit.Position - fromPos).Magnitude)
+        if checkDir.Magnitude < 0.3 then
+            return false, hit.Distance
+        end
     end
     return true, distance
 end
@@ -1395,20 +1445,37 @@ local lastPathTime = 0
 local currentWaypointIndex = 1
 
 local function GetDungeonWaypoints(startPos, endPos)
+    -- AgentRadius = 1.8 giúp luồn lách qua các cửa hẹp, góc cột đền thờ mà không bị kẹt NavMesh
     local path = PathfindingService:CreatePath({
-        AgentRadius = 2.5,
-        AgentHeight = 5,
+        AgentRadius = 1.8,
+        AgentHeight = 4.5,
         AgentCanJump = true,
-        WaypointSpacing = 4,
+        WaypointSpacing = 3,
     })
-    
+
     local ok = pcall(function()
         path:ComputeAsync(startPos, endPos)
     end)
-    
+
     if ok and path.Status == Enum.PathStatus.Success then
-        return path:GetWaypoints()
+        local wps = path:GetWaypoints()
+        if wps and #wps > 0 then
+            return wps
+        end
     end
+
+    -- Nếu đứng sát chân tường / bậc thềm: Nâng nhẹ vị trí xuất phát +1.5 stud để tính lại
+    local nudgedStart = startPos + Vector3.new(0, 1.5, 0)
+    ok = pcall(function()
+        path:ComputeAsync(nudgedStart, endPos)
+    end)
+    if ok and path.Status == Enum.PathStatus.Success then
+        local wps = path:GetWaypoints()
+        if wps and #wps > 0 then
+            return wps
+        end
+    end
+
     return nil
 end
 
@@ -1417,24 +1484,28 @@ local function FollowWaypoints(targetPos)
     local hum = GetHumanoid()
     if not root or not hum then return end
 
+    -- Bật AutoRotate để nhân vật tự xoay mặt theo từng khúc cua của hành lang
+    hum.AutoRotate = true
+
     local now = os.clock()
     local needCompute = (not cachedPathWaypoints)
         or (now - lastPathTime > 1.2)
-        or (cachedPathTarget and (targetPos - cachedPathTarget).Magnitude > 12)
+        or (cachedPathTarget and (targetPos - cachedPathTarget).Magnitude > 10)
         or (currentWaypointIndex > #cachedPathWaypoints)
 
     if needCompute then
         lastPathTime = now
         cachedPathTarget = targetPos
         cachedPathWaypoints = GetDungeonWaypoints(root.Position, targetPos)
-        currentWaypointIndex = 2
+        currentWaypointIndex = (cachedPathWaypoints and #cachedPathWaypoints > 1) and 2 or 1
     end
 
     if cachedPathWaypoints and #cachedPathWaypoints >= currentWaypointIndex then
         local wp = cachedPathWaypoints[currentWaypointIndex]
         if wp then
-            local wpDist = (Vector3.new(wp.Position.X, root.Position.Y, wp.Position.Z) - root.Position).Magnitude
-            if wpDist < 4.0 then
+            local flatPlayerPos = Vector3.new(root.Position.X, wp.Position.Y, root.Position.Z)
+            local wpDist = (wp.Position - flatPlayerPos).Magnitude
+            if wpDist < 3.0 then
                 currentWaypointIndex = currentWaypointIndex + 1
                 if cachedPathWaypoints[currentWaypointIndex] then
                     wp = cachedPathWaypoints[currentWaypointIndex]
@@ -1444,11 +1515,31 @@ local function FollowWaypoints(targetPos)
                 if wp.Action == Enum.PathWaypointAction.Jump then
                     hum.Jump = true
                 end
-                SmoothMoveTo(hum, wp.Position, false)
+                SmoothMoveTo(hum, wp.Position, true)
             end
         end
     else
-        SmoothMoveTo(hum, targetPos, false)
+        -- Không tìm được đường thẳng tới targetPos (bị tường cản trở hoàn toàn):
+        -- TUYỆT ĐỐI KHÔNG lao đầu vào tường!
+        -- Tự động tìm hướng thoáng nhất trong phòng để bước ra không gian mở
+        local bestDir = nil
+        local maxClear = 0
+        local testAngles = {0, 45, 90, 135, 180, 225, 270, 315}
+        for _, deg in ipairs(testAngles) do
+            local rad = math.rad(deg)
+            local testDir = Vector3.new(math.sin(rad), 0, math.cos(rad))
+            local clear, cDist = CheckDirectionClear(root.Position, testDir, 8)
+            if cDist > maxClear then
+                maxClear = cDist
+                bestDir = testDir
+            end
+        end
+
+        if bestDir and maxClear > 2.0 then
+            hum.Jump = true
+            local stepDist = math.min(5, maxClear - 1)
+            SmoothMoveTo(hum, root.Position + bestDir * stepDist, true)
+        end
     end
 end
 
@@ -1704,34 +1795,69 @@ local function ProcessSmartCombat()
     -- Bật xoay tự nhiên của Humanoid để chống giật hình (Jitter-free smooth movement)
     hum.AutoRotate = true
 
-    -- Kiểm tra chống kẹt địa hình thông minh (chỉ kích hoạt khi đang di chuyển tiếp cận quái ở xa)
+    -- HỆ THỐNG PHÁT HIỆN & TỰ ĐỘNG GIẢI KẸT ĐỊA HÌNH TOÀN DIỆN (UNIVERSAL ANTI-STUCK)
+    -- Tự động kích hoạt ở mọi cự ly: nếu bị kẹt tường/góc cột/bậc thềm > 1.2s -> Tự động nhảy và né ra vùng thoáng
     local now = os.clock()
-    if dist > (safeMaxDist + 6) then
-        if not lastPlayerPos then
-            lastPlayerPos = root.Position
-            lastPlayerMoveTime = now
-        else
-            local moved = (root.Position - lastPlayerPos).Magnitude
-            if moved > 2.0 then
-                lastPlayerPos = root.Position
-                lastPlayerMoveTime = now
-            elseif now - lastPlayerMoveTime > 2.5 then
-                hum.Jump = true
-                cachedPathWaypoints = nil
-                lastPlayerMoveTime = now
-            end
-        end
-    else
+    local isCurrentlyStuck = false
+
+    if not lastPlayerPos then
         lastPlayerPos = root.Position
         lastPlayerMoveTime = now
+    else
+        local movedDist = (root.Position - lastPlayerPos).Magnitude
+        if movedDist >= 1.2 then
+            lastPlayerPos = root.Position
+            lastPlayerMoveTime = now
+        elseif (now - lastPlayerMoveTime) > 1.2 then
+            isCurrentlyStuck = true
+        end
     end
 
-    -- Khi trong phạm vi giao chiến: Luôn xoay mặt và cơ thể nhìn thẳng vào quái vật
-    -- (Tuyệt đối không quay lưng lại quái hay đâm mặt vào tường)
-    local lookAtTarget = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
-    local toMob = (lookAtTarget - root.Position)
-    if toMob.Magnitude > 0.1 then
-        root.CFrame = CFrame.lookAt(root.Position, lookAtTarget)
+    if isCurrentlyStuck then
+        cachedPathWaypoints = nil
+        lastPathTime = 0
+        hum.Jump = true
+        hum.AutoRotate = true
+
+        -- Quét 8 hướng xung quanh để tìm khoảng không gian rộng nhất thoát hiểm
+        local bestEscapeDir = nil
+        local maxClearDist = 0
+        local escapeAngles = {0, 45, 90, 135, 180, 225, 270, 315}
+        for _, deg in ipairs(escapeAngles) do
+            local rad = math.rad(deg)
+            local testDir = Vector3.new(math.sin(rad), 0, math.cos(rad))
+            local clear, cDist = CheckDirectionClear(root.Position, testDir, 8)
+            if cDist > maxClearDist then
+                maxClearDist = cDist
+                bestEscapeDir = testDir
+            end
+        end
+
+        if bestEscapeDir and maxClearDist > 2.0 then
+            local escapeStep = math.min(5, maxClearDist - 1.2)
+            SmoothMoveTo(hum, root.Position + bestEscapeDir * escapeStep, true)
+            State.CurrentStatus = string.format("🚨 Tự gỡ kẹt góc tường/cột (Né ra %.1fm)", escapeStep)
+        else
+            hum.Jump = true
+            SmoothMoveTo(hum, root.Position - root.CFrame.LookVector * 4, true)
+            State.CurrentStatus = "🚨 Tự gỡ kẹt khẩn cấp (Nhảy lùi)!"
+        end
+
+        lastPlayerPos = root.Position
+        lastPlayerMoveTime = now - 0.4
+        return
+    end
+
+    -- Khi trong phạm vi giao chiến và có tầm nhìn trực tiếp: Xoay mặt nhìn thẳng vào quái vật
+    -- (Tuyệt đối KHÔNG ép CFrame khi đang di chuyển tìm đường quanh góc tường)
+    if isTargetVis and dist <= safeMaxDist then
+        local lookAtTarget = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
+        local toMob = (lookAtTarget - root.Position)
+        if toMob.Magnitude > 0.1 then
+            root.CFrame = CFrame.lookAt(root.Position, lookAtTarget)
+        end
+    else
+        hum.AutoRotate = true
     end
 
     -- 4. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH THEO CỰ LI CHIÊU
