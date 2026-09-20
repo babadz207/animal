@@ -296,43 +296,45 @@ local State = {
 --------------------------------------------------------------------------------
 local function ClickButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
-    local clicked = false
 
+    -- 1. Kích hoạt trực tiếp qua getconnections (cả Function closure lẫn Fire)
     if type(getconnections) == "function" then
-        local clickConns = getconnections(btn.MouseButton1Click)
-        local downConns = getconnections(btn.MouseButton1Down)
-        local actConns = getconnections(btn.Activated)
-
-        -- 1. Kích hoạt MouseButton1Click (các nút Replay, Start, Create, Swap...)
-        if clickConns and #clickConns > 0 then
-            for _, c in ipairs(clickConns) do
-                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
-            end
-        end
-
-        -- 2. Kích hoạt MouseButton1Down (nơi chứa code mở menu chính của Dungeon Quest: playButton, inventoryButton...)
-        if downConns and #downConns > 0 then
-            for _, c in ipairs(downConns) do
-                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
-            end
-        end
-
-        -- 3. Fallback sang Activated nếu không có 2 sự kiện trên
-        if not clicked and actConns and #actConns > 0 then
-            for _, c in ipairs(actConns) do
-                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
-            end
+        for _, evtName in ipairs({"MouseButton1Down", "MouseButton1Click", "Activated"}) do
+            pcall(function()
+                local conns = getconnections(btn[evtName])
+                if conns and #conns > 0 then
+                    for _, c in ipairs(conns) do
+                        if c.Enabled then
+                            if type(c.Function) == "function" then
+                                pcall(c.Function)
+                            end
+                            pcall(function() c:Fire() end)
+                        end
+                    end
+                end
+            end)
         end
     end
 
-    -- CHỈ fallback sang firesignal nếu getconnections không tìm thấy bất kỳ listener nào (chống double-toggle)
-    if not clicked and typeof(firesignal) == "function" then
-        pcall(function() firesignal(btn.MouseButton1Click) end)
+    -- 2. Luôn kích hoạt firesignal cho cả 3 sự kiện chuẩn của UI Roblox
+    if typeof(firesignal) == "function" then
         pcall(function() firesignal(btn.MouseButton1Down) end)
-        clicked = true
+        pcall(function() firesignal(btn.MouseButton1Click) end)
+        pcall(function() firesignal(btn.Activated) end)
     end
 
-    return clicked
+    -- 3. Kích hoạt qua VirtualInputManager (Mô phỏng click chuột phần cứng 100% chuẩn xác của Roblox Engine)
+    local vim = game:GetService("VirtualInputManager")
+    if vim and btn.Visible then
+        pcall(function()
+            local center = btn.AbsolutePosition + btn.AbsoluteSize / 2
+            vim:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+            task.wait(0.02)
+            vim:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+        end)
+    end
+
+    return true
 end
 
 -- Lấy chính xác các Tool kỹ năng đang hiển thị trên hotbar (Backpack / Character)
@@ -466,27 +468,57 @@ local function ProcessAutoEnter()
     -- Nút Play ở màn hình Intro
     local intro = PlayerGui:FindFirstChild("introGui")
     if intro and intro.Enabled then
-        local playBtn = intro:FindFirstChild("title") 
-            and intro.title:FindFirstChild("Frame") 
-            and intro.title.Frame:FindFirstChild("TextButton")
+        local playBtn = nil
+        if intro:FindFirstChild("title") and intro.title:FindFirstChild("Frame") and intro.title.Frame:FindFirstChild("TextButton") then
+            playBtn = intro.title.Frame.TextButton
+        end
+
+        if not playBtn or not playBtn.Visible then
+            for _, d in ipairs(intro:GetDescendants()) do
+                if d:IsA("GuiButton") and d.Visible then
+                    if (d:IsA("TextButton") and d.Text:lower():find("play")) or d.Name:lower():find("play") then
+                        playBtn = d
+                        break
+                    end
+                end
+            end
+        end
+
+        if not playBtn or not playBtn.Visible then
+            for _, d in ipairs(intro:GetDescendants()) do
+                if d:IsA("GuiButton") and d.Visible then
+                    playBtn = d
+                    break
+                end
+            end
+        end
+
         if playBtn and playBtn.Visible then
             State.CurrentStatus = "Bấm nút Play vào game..."
             ClickButton(playBtn)
-            task.wait(0.5)
+            task.wait(0.3)
         end
     end
 
     -- Bỏ qua màn hình hướng dẫn Tutorial
     local tut = PlayerGui:FindFirstChild("tutorialConfirm")
     if tut and tut.Enabled then
-        local skipBtn = tut:FindFirstChild("Frame")
-            and tut.Frame:FindFirstChild("Frame")
-            and tut.Frame.Frame:FindFirstChild("no")
-            and tut.Frame.Frame.no:FindFirstChild("TextButton")
+        local skipBtn = nil
+        if tut:FindFirstChild("Frame") and tut.Frame:FindFirstChild("Frame") and tut.Frame.Frame:FindFirstChild("no") and tut.Frame.Frame.no:FindFirstChild("TextButton") then
+            skipBtn = tut.Frame.Frame.no.TextButton
+        end
+        if not skipBtn or not skipBtn.Visible then
+            for _, d in ipairs(tut:GetDescendants()) do
+                if d:IsA("GuiButton") and d.Visible and ((d:IsA("TextButton") and (d.Text:lower():find("no") or d.Text:lower():find("skip"))) or d.Name:lower():find("no")) then
+                    skipBtn = d
+                    break
+                end
+            end
+        end
         if skipBtn then
             State.CurrentStatus = "Bỏ qua màn Tutorial..."
             ClickButton(skipBtn)
-            task.wait(0.5)
+            task.wait(0.3)
         end
     end
 end
