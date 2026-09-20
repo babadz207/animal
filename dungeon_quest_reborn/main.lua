@@ -938,14 +938,12 @@ local function ProcessSmartCombat()
 
     local healthPercent = hum.Health / hum.MaxHealth
 
-    -- 1. Lọc quái vật: Ưu tiên quái ở gần nhất trong phạm vi hợp lệ (không nhảy cóc qua phòng bị khóa)
+    -- 1. Tìm quái vật mục tiêu ưu tiên (quái gần nhất còn sống)
     local targetMob = nil
     local shortestDist = math.huge
     local livingMobs = #allMobs
     local isBossTarget = false
-    local isRangedTarget = false
 
-    -- Ưu tiên quái có tầm nhìn hoặc trong bán kính 60 studs gần nhất
     for _, mob in ipairs(allMobs) do
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
@@ -964,27 +962,59 @@ local function ProcessSmartCombat()
         local mobRoot = targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")
         local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
         if mobRoot and mobHum and mobHum.Health > 0 then
-            local dist = (mobRoot.Position - root.Position).Magnitude
+            local diff = root.Position - mobRoot.Position
+            local dist = diff.Magnitude
             local enemyHp = math.floor(mobHum.Health)
             local enemyMaxHp = math.floor(mobHum.MaxHealth)
+            isBossTarget = (mobHum.MaxHealth > 10000) or (targetMob.Name:lower():find("boss") ~= nil)
 
-            State.CurrentStatus = string.format("⚔️ Diệt quái: %s (HP: %d/%d | Cách: %dm)", targetMob.Name, enemyHp, enemyMaxHp, math.floor(dist))
+            -- Xác định lớp nhân vật để tính cự ly kiting tối ưu
+            local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
+            local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
+            local isMage = (sp >= pp)
 
-            -- Di chuyển an toàn bằng Humanoid:MoveTo để 100% không bị Server Anti-Cheat phát hiện
-            if dist > 12 then
+            local idealRange = isMage and (Config.CombatRangeMage or 14) or (Config.CombatRangeWarrior or 6)
+            local minKiteDist = isMage and 10 or 4
+
+            -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
+            local horizontalDiff = Vector3.new(diff.X, 0, diff.Z)
+            local awayDir = (horizontalDiff.Magnitude > 0.1) and horizontalDiff.Unit or Vector3.new(0, 0, 1)
+
+            -- Luôn xoay nhân vật nhìn thẳng vào quái vật để vung đòn & bắn chiêu chuẩn xác
+            local lookAtPos = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
+            pcall(function()
+                root.CFrame = CFrame.lookAt(root.Position, lookAtPos)
+            end)
+
+            -- 2. DI CHUYỂN & KITING ĐI LÙI THÔNG MINH
+            if dist > idealRange + 3 then
+                -- A. Khi ở xa: Đi bộ tiến tới gần quái qua đường đi thông minh (NavMesh Pathfinding)
+                State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
                 local waypoints = GetDungeonWaypoints(root.Position, mobRoot.Position)
                 if waypoints and #waypoints > 1 then
                     hum:MoveTo(waypoints[2].Position)
                 else
                     hum:MoveTo(mobRoot.Position)
                 end
+            elseif dist < minKiteDist then
+                -- B. Khi quái áp sát quá gần: ĐI LÙI THẬT THÔNG MINH (Kiting Backward + Strafe né góc)
+                local strafeOffset = Vector3.new(-awayDir.Z, 0, awayDir.X) * 2
+                local kitePos = root.Position + awayDir * 7 + strafeOffset
+                State.CurrentStatus = string.format("🔄 Đi lùi thông minh (Kite) vừa xả đòn: %s", targetMob.Name)
+                hum:MoveTo(kitePos)
             else
-                -- Khi đã ở cự ly gần: Tiếp cận và duy trì khoảng cách tấn công
-                hum:MoveTo(mobRoot.Position)
+                -- C. Cự ly vàng (Sweet spot): Giữ khoảng cách và đảo bước chân nhẹ
+                local strafeOffset = Vector3.new(-awayDir.Z, 0, awayDir.X) * 3
+                State.CurrentStatus = string.format("⚔️ Giữ cự ly & xả đòn: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
+                hum:MoveTo(root.Position + strafeOffset)
             end
 
-            -- Chém vũ khí & Xả chiêu thức thông minh qua Remote/Bindable
-            AttackWithWeapon(mobRoot.Position)
+            -- 3. ĐÁNH THƯỜNG VỚI VŨ KHÍ (KHI TRONG TẦM TẤN CÔNG)
+            if dist <= (idealRange + 8) then
+                AttackWithWeapon(mobRoot.Position)
+            end
+
+            -- 4. XẢ SKILL THÔNG MINH (Fireball, chiêu thức trong túi đồ & phím Q/E)
             CastAllAbilities(isBossTarget, livingMobs, healthPercent)
         end
     end
