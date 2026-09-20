@@ -287,6 +287,7 @@ local State = {
     SoldItemsCount = 0,
     StartTime = os.time(),
     EquippedBeforeJoin = false,
+    HasCompleteSecondSet = false,
 }
 
 --------------------------------------------------------------------------------
@@ -325,6 +326,73 @@ local function ClickButton(btn)
     end
 
     return clicked
+end
+
+-- Lấy chính xác các Tool kỹ năng đang hiển thị trên hotbar (Backpack / Character)
+local function GetActiveHotbarSkills()
+    local qTool, eTool = nil, nil
+    local containers = {LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character}
+    for _, cont in ipairs(containers) do
+        if cont then
+            for _, t in ipairs(cont:GetChildren()) do
+                if t:IsA("Tool") then
+                    local s = t:FindFirstChild("abilitySlot") or t:FindFirstChild("slot")
+                    local sVal = s and tostring(s.Value):lower()
+                    if sVal == "q" then
+                        qTool = t
+                    elseif sVal == "e" then
+                        eTool = t
+                    end
+                end
+            end
+        end
+    end
+    return qTool, eTool
+end
+
+-- Đảm bảo hotbar luôn có đầy đủ 2 chiêu (không bị tình trạng khuyết slot E hoặc kẹt ở Set 2 rỗng)
+local lastEnsureSwapTime = 0
+local function EnsureActiveSkillSetComplete()
+    local qTool, eTool = GetActiveHotbarSkills()
+    -- Nếu cả 2 slot Q và E đều đã có chiêu thì hotbar hoàn hảo, không cần thao tác gì
+    if qTool and eTool then return true end
+
+    -- Nếu bị khuyết chiêu (ví dụ có Q mà mất E hoặc ngược lại):
+    local now = os.clock()
+    if now - lastEnsureSwapTime < 1.5 then return false end
+    lastEnsureSwapTime = now
+
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local swapBtn = abilitiesGui and abilitiesGui:FindFirstChild("Swap", true)
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+
+    local beforeCount = (qTool and 1 or 0) + (eTool and 1 or 0)
+
+    -- Kích hoạt đổi bộ kỹ năng (Swap) để lấy lại bộ chiêu đầy đủ
+    if swapBtn then
+        ClickButton(swapBtn)
+    end
+    if remotes and remotes:FindFirstChild("swapAbilitySet") then
+        pcall(function() remotes.swapAbilitySet:FireServer() end)
+    end
+    if remotes and remotes:FindFirstChild("abilitySetSwapped") then
+        pcall(function() remotes.abilitySetSwapped:FireServer() end)
+    end
+
+    task.wait(0.25)
+    local newQ, newE = GetActiveHotbarSkills()
+    local afterCount = (newQ and 1 or 0) + (newE and 1 or 0)
+
+    -- Nếu đổi xong mà tệ hơn (ví dụ từ 1 chiêu thành 0 chiêu), swap ngược lại ngay
+    if afterCount < beforeCount then
+        if swapBtn then ClickButton(swapBtn) end
+        if remotes and remotes:FindFirstChild("swapAbilitySet") then
+            pcall(function() remotes.swapAbilitySet:FireServer() end)
+        end
+        return false
+    end
+
+    return (newQ and newE) ~= nil
 end
 
 local function GetPlayButton()
@@ -743,25 +811,38 @@ local function ProcessAutoEquip()
             end
         end
 
-        -- Set 2: Slot Q2
-        for _, ab in ipairs(rawAbilities) do
-            if not usedItemNums[ab.num] then
-                targetSlots["q2"] = ab
-                usedItemNums[ab.num] = true
-                break
-            end
-        end
-
-        -- Set 2: Slot E2 (Chiêu thứ 2 của Set 2 KHÁC LOẠI với Q2)
-        for _, ab in ipairs(rawAbilities) do
-            if not usedItemNums[ab.num] then
-                local conflictWithQ2 = targetSlots["q2"] and (ab.baseName == targetSlots["q2"].baseName)
-                if not conflictWithQ2 then
-                    targetSlots["e2"] = ab
-                    usedItemNums[ab.num] = true
+        -- Set 2: CHỈ trang bị Set 2 khi có ĐỦ CẢ 2 CHIÊU HỢP LỆ (Q2 và E2 khác loại nhau)!
+        -- Tuyệt đối KHÔNG trang bị Set 2 nếu chỉ có 1 chiêu đơn lẻ, vì máy chủ sẽ tự động chuyển góc nhìn
+        -- sang Set 2 khiến người chơi bị khuyết mất slot E (chỉ có 1 chiêu trên hotbar)!
+        local candidateQ2 = nil
+        local candidateE2 = nil
+        for _, ab1 in ipairs(rawAbilities) do
+            if not usedItemNums[ab1.num] then
+                for _, ab2 in ipairs(rawAbilities) do
+                    if ab2.num ~= ab1.num and not usedItemNums[ab2.num] then
+                        if ab1.baseName ~= ab2.baseName then
+                            candidateQ2 = ab1
+                            candidateE2 = ab2
+                            break
+                        end
+                    end
+                end
+                if candidateQ2 and candidateE2 then
                     break
                 end
             end
+        end
+
+        if candidateQ2 and candidateE2 then
+            targetSlots["q2"] = candidateQ2
+            targetSlots["e2"] = candidateE2
+            usedItemNums[candidateQ2.num] = true
+            usedItemNums[candidateE2.num] = true
+            State.HasCompleteSecondSet = true
+        else
+            targetSlots["q2"] = nil
+            targetSlots["e2"] = nil
+            State.HasCompleteSecondSet = false
         end
 
         -- 4. ĐỒNG BỘ TRANG BỊ VỚI GAME SERVER
@@ -801,6 +882,9 @@ local function ProcessAutoEquip()
                 end
             end
         end
+
+        -- Đảm bảo sau khi trang bị, hotbar của nhân vật luôn hiển thị đầy đủ bộ kỹ năng (không bị khuyết E)
+        EnsureActiveSkillSetComplete()
     end
 end
 
@@ -1132,6 +1216,9 @@ end
 
 local function SwapAbilitySet()
     if not Config.AutoSwapSkills then return false end
+    -- BẢO VỆ TUYỆT ĐỐI: Tuyệt đối không swap nếu người chơi không có đủ 2 bộ chiêu hoàn chỉnh (4 kỹ năng)!
+    -- Tránh việc swap sang bộ rỗng hoặc chỉ có 1 chiêu làm mất slot E!
+    if not State.HasCompleteSecondSet then return false end
     if os.clock() - lastSwapTime < 4.0 then return false end -- Tối thiểu 4s mới được đổi lại
 
     local abilitiesGui = PlayerGui:FindFirstChild("abilities")
@@ -1144,15 +1231,16 @@ local function SwapAbilitySet()
     local swapBtn = abilitiesGui and abilitiesGui:FindFirstChild("Swap", true)
     if swapBtn and swapBtn:IsA("GuiButton") then
         ClickButton(swapBtn)
-        return true
     end
 
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    if remotes and remotes:FindFirstChild("swapAbilitySet") then
+        pcall(function() remotes.swapAbilitySet:FireServer() end)
+    end
     if remotes and remotes:FindFirstChild("abilitySetSwapped") then
         pcall(function() remotes.abilitySetSwapped:FireServer() end)
-        return true
     end
-    return false
+    return true
 end
 
 --------------------------------------------------------------------------------
@@ -1281,41 +1369,28 @@ end
 
 -- Xác định cự ly chiến đấu động tối ưu dựa trên từng chiêu đang trang bị & thời gian hồi chiêu
 local function GetDynamicCombatProfile(currentDist)
-    local bp = LocalPlayer:FindFirstChild("Backpack")
     local abilitiesGui = PlayerGui:FindFirstChild("abilities")
     local leftBtn = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true)
     local rightBtn = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true)
 
-    local qTool, eTool = nil, nil
-    if bp then
-        for _, t in ipairs(bp:GetChildren()) do
-            if t:IsA("Tool") then
-                local slotVal = t:FindFirstChild("abilitySlot") and t.abilitySlot.Value:lower()
-                if slotVal == "q" then
-                    qTool = t
-                elseif slotVal == "e" then
-                    eTool = t
-                end
-            end
-        end
-    end
+    local qTool, eTool = GetActiveHotbarSkills()
 
-    local qName = qTool and qTool.Name or "Skill Q"
-    local eName = eTool and eTool.Name or "Skill E"
+    local qName = qTool and qTool.Name or nil
+    local eName = eTool and eTool.Name or nil
 
-    local qRange = CalculateSkillRange(qName, qTool)
-    local eRange = CalculateSkillRange(eName, eTool)
+    local qRange = qTool and CalculateSkillRange(qName, qTool) or nil
+    local eRange = eTool and CalculateSkillRange(eName, eTool) or nil
     local weaponRange = GetEquippedWeaponRange()
 
-    local qCooldown = IsOnCooldown(leftBtn) or (qTool and qTool:FindFirstChild("cooldown") and qTool.cooldown.Value > 0.1)
-    local eCooldown = IsOnCooldown(rightBtn) or (eTool and eTool:FindFirstChild("cooldown") and eTool.cooldown.Value > 0.1)
+    local qCooldown = (not qTool) or IsOnCooldown(leftBtn) or (qTool:FindFirstChild("cooldown") and qTool.cooldown.Value > 0.1)
+    local eCooldown = (not eTool) or IsOnCooldown(rightBtn) or (eTool:FindFirstChild("cooldown") and eTool.cooldown.Value > 0.1)
 
     -- Thu thập danh sách chiêu thức sát thương ĐANG SẴN SÀNG (không bị hồi chiêu)
     local readyDamagingSkills = {}
-    if not qCooldown and not qRange.isHeal then
+    if qTool and not qCooldown and qRange and not qRange.isHeal then
         table.insert(readyDamagingSkills, {name = qName, profile = qRange, slot = "Q", tool = qTool})
     end
-    if not eCooldown and not eRange.isHeal then
+    if eTool and not eCooldown and eRange and not eRange.isHeal then
         table.insert(readyDamagingSkills, {name = eName, profile = eRange, slot = "E", tool = eTool})
     end
 
@@ -1324,7 +1399,7 @@ local function GetDynamicCombatProfile(currentDist)
     local activeSkillInfo = ""
 
     if #readyDamagingSkills == 0 then
-        -- CẢ 2 CHIÊU ĐỀU ĐANG HỒI (hoặc chỉ có chiêu Hồi máu):
+        -- CẢ 2 CHIÊU ĐỀU ĐANG HỒI (hoặc chỉ có chiêu Hồi máu hoặc không có chiêu):
         -- Dùng cự ly của Vũ khí đánh thường (Wand bắn xa 17m hoặc Kiếm chém 7.2m)
         chosenProfile = weaponRange
         activeSkillInfo = string.format("Vũ khí [%s]", chosenProfile.isRanged and "Tầm xa" or "Cận chiến")
@@ -1359,8 +1434,8 @@ local function GetDynamicCombatProfile(currentDist)
     end
 
     return chosenProfile, activeSkillInfo, {
-        q = {name = qName, onCd = qCooldown, range = qRange},
-        e = {name = eName, onCd = eCooldown, range = eRange},
+        q = qTool and {name = qName, onCd = qCooldown, range = qRange} or nil,
+        e = eTool and {name = eName, onCd = eCooldown, range = eRange} or nil,
     }
 end
 
@@ -1720,7 +1795,7 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
     local canCastQ = false
     local canCastE = false
 
-    if skillsDebug and skillsDebug.q and not skillsDebug.q.onCd then
+    if skillsDebug and skillsDebug.q and skillsDebug.q.name and not skillsDebug.q.onCd and skillsDebug.q.range then
         local qRange = skillsDebug.q.range
         if qRange.isHeal then
             canCastQ = (healthPercent < 0.75)
@@ -1732,7 +1807,7 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
         end
     end
 
-    if skillsDebug and skillsDebug.e and not skillsDebug.e.onCd then
+    if skillsDebug and skillsDebug.e and skillsDebug.e.name and not skillsDebug.e.onCd and skillsDebug.e.range then
         local eRange = skillsDebug.e.range
         if eRange.isHeal then
             canCastE = (healthPercent < 0.75)
@@ -1774,15 +1849,15 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
         end
     end
 
-    -- 3. KÍCH HOẠT GUI BUTTON VÀ SERVER REMOTE CHO TỪNG CHIÊU THỨC RIÊNG BIỆT (CHỈ KHI TRONG TẦM)
-    if canCastQ then
+    -- 3. KÍCH HOẠT GUI BUTTON VÀ SERVER REMOTE CHO TỪNG CHIÊU THỨC RIÊNG BIỆT (CHỈ KHI TRONG TẦM VÀ THỰC SỰ CÓ CHIÊU)
+    if canCastQ and skillsDebug and skillsDebug.q then
         if leftBtn then ClickButton(leftBtn) end
         if remotes and remotes:FindFirstChild("abilityCast") then
             pcall(function() remotes.abilityCast:FireServer(1) end)
         end
     end
 
-    if canCastE then
+    if canCastE and skillsDebug and skillsDebug.e then
         if rightBtn then ClickButton(rightBtn) end
         if remotes and remotes:FindFirstChild("abilityCast") then
             pcall(function() remotes.abilityCast:FireServer(2) end)
@@ -1804,6 +1879,9 @@ local function ProcessSmartCombat()
     local hum = GetHumanoid()
     local char = LocalPlayer.Character
     if not root or not hum or hum.Health <= 0 then return end
+
+    -- Đảm bảo hotbar luôn có đầy đủ bộ kỹ năng (không bị kẹt ở bộ skill rỗng/khuyết)
+    EnsureActiveSkillSetComplete()
 
     local allMobs = GetAllDungeonEnemies()
     if #allMobs == 0 then
