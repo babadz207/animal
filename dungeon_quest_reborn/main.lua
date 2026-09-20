@@ -192,29 +192,32 @@ local function ClickButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
     local clicked = false
 
-    -- 1. getconnections (Kích hoạt chính xác function lắng nghe Activated, MouseButton1Down/Up/Click mà KHÔNG can thiệp chuột thật)
     if getconnections then
-        for _, evt in ipairs({"Activated", "MouseButton1Down", "MouseButton1Up", "MouseButton1Click"}) do
-            local conns = getconnections(btn[evt])
-            if conns and #conns > 0 then
-                for _, conn in ipairs(conns) do
-                    if conn.Enabled then
-                        pcall(function() conn:Fire() end)
-                        clicked = true
-                    end
-                end
+        local downConns = getconnections(btn.MouseButton1Down)
+        local upConns = getconnections(btn.MouseButton1Up)
+        local actConns = getconnections(btn.Activated)
+        local clickConns = getconnections(btn.MouseButton1Click)
+
+        if (downConns and #downConns > 0) or (upConns and #upConns > 0) then
+            if downConns then
+                for _, c in ipairs(downConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+                task.wait(0.03)
             end
+            if upConns then
+                for _, c in ipairs(upConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+            end
+        elseif actConns and #actConns > 0 then
+            for _, c in ipairs(actConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+        elseif clickConns and #clickConns > 0 then
+            for _, c in ipairs(clickConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
         end
     end
 
-    -- 2. firesignal nếu có hỗ trợ
-    if typeof(firesignal) == "function" then
-        for _, sig in ipairs({"Activated", "MouseButton1Down", "MouseButton1Up", "MouseButton1Click"}) do
-            pcall(function()
-                firesignal(btn[sig])
-                clicked = true
-            end)
-        end
+    if not clicked and typeof(firesignal) == "function" then
+        pcall(function() firesignal(btn.MouseButton1Down) end)
+        task.wait(0.03)
+        pcall(function() firesignal(btn.MouseButton1Up) end)
+        clicked = true
     end
 
     return clicked
@@ -778,7 +781,8 @@ local function ProcessLobbyProgression()
 
             -- Bật phòng Private nếu cấu hình
             if Config.PrivateLobby then
-                local privBtn = choose:FindFirstChild("private", true) and choose.private:FindFirstChild("button", true)
+                local privContainer = choose:FindFirstChild("private", true)
+                local privBtn = privContainer and privContainer:FindFirstChildWhichIsA("GuiButton", true)
                 if privBtn then
                     ClickButton(privBtn)
                     task.wait(0.1)
@@ -786,9 +790,10 @@ local function ProcessLobbyProgression()
             end
 
             -- Bấm Create Lobby trên giao diện
-            local startMain = choose:FindFirstChild("startMain", true) and choose.startMain:FindFirstChild("TextButton", true)
-            if startMain then
-                ClickButton(startMain)
+            local startMainContainer = choose:FindFirstChild("startMain", true)
+            local startMainBtn = startMainContainer and startMainContainer:FindFirstChildWhichIsA("GuiButton", true)
+            if startMainBtn then
+                ClickButton(startMainBtn)
             end
 
             -- Đồng thời gọi Remote createLobby trực tiếp để đảm bảo 100%
@@ -1255,29 +1260,70 @@ local function GetAllDungeonEnemies()
 end
 
 local lastAbilityCastTime = 0
-local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist)
+local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, skillsDebug)
     if not Config.AutoSpamSkills then return end
     local now = os.clock()
-    if now - lastAbilityCastTime < 0.2 then return end
+    if now - lastAbilityCastTime < 0.15 then return end
     lastAbilityCastTime = now
 
-    -- 1. Kích hoạt chiêu thức trực tiếp trong Backpack theo cự ly chuẩn xác của chiêu đó
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local leftAbility = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true)
+    local rightAbility = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true)
+    local leftBtn = leftAbility and leftAbility:FindFirstChildWhichIsA("GuiButton", true)
+    local rightBtn = rightAbility and rightAbility:FindFirstChildWhichIsA("GuiButton", true)
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+
+    -- 1. KIỂM TRA ĐIỀU KIỆN XẢ TỪNG CHIÊU Q VÀ E RIÊNG BIỆT
+    -- CHỈ XẢ KHI QUÁI NẰM TRONG TẦM HIỆU LỰC (MAXCAST) CỦA CHIÊU ĐÓ!
+    -- Không trong tầm thì TUYỆT ĐỐI KHÔNG XẢ CHIÊU!
+    local canCastQ = false
+    local canCastE = false
+
+    if skillsDebug and skillsDebug.q and not skillsDebug.q.onCd then
+        local qRange = skillsDebug.q.range
+        if qRange.isHeal then
+            canCastQ = (healthPercent < 0.75)
+        else
+            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh của chiêu Q
+            if targetDist and qRange.maxCast and targetDist <= (qRange.maxCast + 0.5) then
+                canCastQ = true
+            end
+        end
+    end
+
+    if skillsDebug and skillsDebug.e and not skillsDebug.e.onCd then
+        local eRange = skillsDebug.e.range
+        if eRange.isHeal then
+            canCastE = (healthPercent < 0.75)
+        else
+            -- Chiêu sát thương: Bắt buộc quái phải nằm trong tầm đánh của chiêu E
+            if targetDist and eRange.maxCast and targetDist <= (eRange.maxCast + 0.5) then
+                canCastE = true
+            end
+        end
+    end
+
+    -- 2. KÍCH HOẠT CHIÊU THỨC TRONG BACKPACK (Nếu chiêu đó thỏa mãn điều kiện cự ly)
     local bp = LocalPlayer:FindFirstChild("Backpack")
     if bp then
         for _, tool in ipairs(bp:GetChildren()) do
             if tool:IsA("Tool") then
-                local rangeProfile = CalculateSkillRange(tool.Name, tool)
-                local canCast = true
-                if rangeProfile.isHeal then
-                    canCast = (healthPercent < 0.75)
+                local slotVal = tool:FindFirstChild("abilitySlot") and tool.abilitySlot.Value:lower()
+                local toolCanCast = false
+                if slotVal == "q" then
+                    toolCanCast = canCastQ
+                elseif slotVal == "e" then
+                    toolCanCast = canCastE
                 else
-                    -- Không xả chiêu khi quái ở ngoài tầm đánh (tránh đánh gió / lãng phí cooldown)
-                    if targetDist and rangeProfile.maxCast and targetDist > (rangeProfile.maxCast + 2.0) then
-                        canCast = false
+                    local rProf = CalculateSkillRange(tool.Name, tool)
+                    if rProf.isHeal then
+                        toolCanCast = (healthPercent < 0.75)
+                    elseif targetDist and rProf.maxCast and targetDist <= (rProf.maxCast + 0.5) then
+                        toolCanCast = true
                     end
                 end
 
-                if canCast then
+                if toolCanCast then
                     local localEvt = tool:FindFirstChild("localEvent")
                     if localEvt and localEvt:IsA("BindableEvent") then
                         pcall(function() localEvt:Fire() end)
@@ -1287,23 +1333,19 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist)
         end
     end
 
-    -- 2. Kích hoạt kỹ năng Q và E qua GUI Button signals (100% không đụng tới chuột)
-    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
-    local leftAbility = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true)
-    local rightAbility = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true)
-    local leftBtn = leftAbility and leftAbility:FindFirstChildWhichIsA("GuiButton", true)
-    local rightBtn = rightAbility and rightAbility:FindFirstChildWhichIsA("GuiButton", true)
+    -- 3. KÍCH HOẠT GUI BUTTON VÀ SERVER REMOTE CHO TỪNG CHIÊU THỨC RIÊNG BIỆT (CHỈ KHI TRONG TẦM)
+    if canCastQ then
+        if leftBtn then ClickButton(leftBtn) end
+        if remotes and remotes:FindFirstChild("abilityCast") then
+            pcall(function() remotes.abilityCast:FireServer(1) end)
+        end
+    end
 
-    if leftBtn then ClickButton(leftBtn) end
-    if rightBtn then ClickButton(rightBtn) end
-
-    -- 3. Kích hoạt remote abilityCast
-    local remotes = ReplicatedStorage:FindFirstChild("remotes")
-    if remotes and remotes:FindFirstChild("abilityCast") then
-        pcall(function()
-            remotes.abilityCast:FireServer(1)
-            remotes.abilityCast:FireServer(2)
-        end)
+    if canCastE then
+        if rightBtn then ClickButton(rightBtn) end
+        if remotes and remotes:FindFirstChild("abilityCast") then
+            pcall(function() remotes.abilityCast:FireServer(2) end)
+        end
     end
 
     -- 4. Nếu cả 2 chiêu đang hồi HOẶC game báo "Can swap": Tự động đổi sang bộ kỹ năng thứ 2 để xả tiếp
@@ -1314,11 +1356,24 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist)
     end
 end
 
--- Chống kẹt địa hình khi đi bộ
+-- Bộ điều phối di chuyển mượt mà (chống giật lag, chống spam MoveTo làm khựng nhân vật)
+local lastMoveCommandTime = 0
+local lastMoveDestination = nil
+local lastJumpTime = 0
 local lastPlayerPos = nil
 local lastPlayerMoveTime = 0
 local strafeSign = 1
 local lastStrafeSwitch = 0
+
+local function SmoothMoveTo(hum, targetPos, forceImmediate)
+    if not hum or not targetPos then return end
+    local now = os.clock()
+    if forceImmediate or not lastMoveDestination or (now - lastMoveCommandTime > 0.35) or ((targetPos - lastMoveDestination).Magnitude > 3.0) then
+        lastMoveCommandTime = now
+        lastMoveDestination = targetPos
+        hum:MoveTo(targetPos)
+    end
+end
 
 local function ProcessSmartCombat()
     if not Config.KillAura then return end
@@ -1414,44 +1469,45 @@ local function ProcessSmartCombat()
         lastStrafeSwitch = now
     end
 
-    -- Luôn xoay nhân vật nhìn thẳng vào quái vật để đòn đánh & kỹ năng trúng 100%
-    local lookAtPos = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
-    pcall(function()
-        root.CFrame = CFrame.lookAt(root.Position, lookAtPos)
-    end)
+    -- Bật xoay tự nhiên của Humanoid để chống giật hình (Jitter-free smooth movement)
+    hum.AutoRotate = true
 
-    -- Kiểm tra chống kẹt địa hình
-    if not lastPlayerPos then
-        lastPlayerPos = root.Position
-        lastPlayerMoveTime = now
-    else
-        local moved = (root.Position - lastPlayerPos).Magnitude
-        if moved > 1.2 then
+    -- Kiểm tra chống kẹt địa hình thông minh (chỉ kích hoạt khi đang di chuyển tiếp cận quái ở xa)
+    local now = os.clock()
+    if dist > (safeMaxDist + 6) then
+        if not lastPlayerPos then
             lastPlayerPos = root.Position
             lastPlayerMoveTime = now
-        elseif now - lastPlayerMoveTime > 1.2 then
-            hum.Jump = true
-            cachedPathWaypoints = nil
-            lastPlayerMoveTime = now
+        else
+            local moved = (root.Position - lastPlayerPos).Magnitude
+            if moved > 2.0 then
+                lastPlayerPos = root.Position
+                lastPlayerMoveTime = now
+            elseif now - lastPlayerMoveTime > 2.5 then
+                hum.Jump = true
+                cachedPathWaypoints = nil
+                lastPlayerMoveTime = now
+            end
         end
+    else
+        lastPlayerPos = root.Position
+        lastPlayerMoveTime = now
     end
 
     -- 4. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH THEO CỰ LI CHIÊU
     if dist < safeMinDist then
-        -- A. QUÁ GẦN: ĐI LÙI NGAY LẬP TỨC ĐỂ NÉ ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
-        hum.AutoRotate = false
-
+        -- A. QUÁ GẦN: ĐI LÙI DỨT KHOÁT ĐỂ NÉ ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
         local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 7)
         local chosenMoveTarget = nil
 
         if backClear or backDist > 4.0 then
-            -- Phía sau thông thoáng: Lùi dứt khoát
             local backStep = combatProfile.isRanged and 10 or 6
             chosenMoveTarget = root.Position + awayDir * backStep
             State.CurrentStatus = string.format("🔄 Đi lùi né đánh thường [%s] (Cách: %.1fm)", activeSkillInfo, dist)
-            -- Nhảy lùi khẩn cấp chỉ khi quái áp sát nguy hiểm vào vùng đánh trúng
-            if dist < emergencyDodgeDist then
+            -- Nhảy lùi khẩn cấp chỉ khi quái áp sát nguy hiểm (có debounce 0.8s chống nhảy giật liên tục)
+            if dist < emergencyDodgeDist and (now - lastJumpTime > 0.8) then
                 hum.Jump = true
+                lastJumpTime = now
             end
         else
             -- Phía sau vướng tường/cột: Circle-Strafe né sang bên thoáng nhất
@@ -1462,29 +1518,27 @@ local function ProcessSmartCombat()
             State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe) [%s]", activeSkillInfo)
         end
 
-        hum:MoveTo(chosenMoveTarget)
+        SmoothMoveTo(hum, chosenMoveTarget, true)
 
     elseif dist <= safeMaxDist then
         -- B. CỰ LY VÀNG: Vừa xa tầm đánh của quái vừa trúng tầm skill!
-        hum.AutoRotate = false
         local strafePart = (strafeSign > 0) and leftDir or rightDir
-        local maintainDir = (awayDir * 0.7 + strafePart * 0.4).Unit
+        local maintainDir = (awayDir * 0.6 + strafePart * 0.4).Unit
+        local goldenTarget = root.Position + maintainDir * 5
 
         State.CurrentStatus = string.format("⚔️ Cự ly vàng [%s] (Cách: %.1fm | Quái HP: %d/%d)", activeSkillInfo, dist, enemyHp, enemyMaxHp)
-        hum:MoveTo(root.Position + maintainDir * 4)
+        SmoothMoveTo(hum, goldenTarget, false)
 
     else
         -- C. Ở XA: Tiếp cận quái
         local closeApproachDist = safeMaxDist + 5
         if dist <= closeApproachDist then
-            hum.AutoRotate = true
-            hum:MoveTo(root.Position - awayDir * 4)
+            SmoothMoveTo(hum, mobRoot.Position, false)
         else
             State.CurrentStatus = string.format("🏃 Tiếp cận %s [%s] (Cách: %dm | HP: %d/%d)", targetMob.Name, activeSkillInfo, math.floor(dist), enemyHp, enemyMaxHp)
-            hum.AutoRotate = true
             local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
             if hasLOS then
-                hum:MoveTo(mobRoot.Position)
+                SmoothMoveTo(hum, mobRoot.Position, false)
             else
                 FollowWaypoints(mobRoot.Position)
             end
@@ -1497,8 +1551,8 @@ local function ProcessSmartCombat()
         AttackWithWeapon(mobRoot.Position)
     end
 
-    -- 6. XẢ SKILL THÔNG MINH (Chỉ xả khi quái trong cự ly hữu hiệu của từng chiêu)
-    CastAllAbilities(isBossTarget, livingMobs, healthPercent, dist)
+    -- 6. XẢ SKILL THÔNG MINH (Chỉ xả khi quái nằm TRONG TẦM HIỆU LỰC của từng chiêu!)
+    CastAllAbilities(isBossTarget, livingMobs, healthPercent, dist, skillsDebug)
 end
 
 --------------------------------------------------------------------------------
@@ -1704,9 +1758,9 @@ end
 local function Main()
     CreateDashboard()
 
-    -- Luồng 1: Combat, Di chuyển & Đi lùi Kiting thời gian thực (Cực kỳ mượt mà, phản hồi cao ~16 FPS)
+    -- Luồng 1: Combat, Di chuyển & Đi lùi Kiting mượt mà (Tần số 10 FPS chuẩn physics Roblox)
     task.spawn(function()
-        while task.wait(0.06) do
+        while task.wait(0.1) do
             if getgenv and getgenv()._DQKaitunSession ~= CurrentSession then
                 print("[DungeonQuest] Dừng luồng combat cũ.")
                 break
