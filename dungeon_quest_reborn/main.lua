@@ -404,38 +404,69 @@ local RARITY_SCORE = {
     ["Mythical"] = 6,
 }
 
+local function EnsureWeaponEquipped()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not char or not hum or not backpack then return end
+
+    -- Nếu tay chưa cầm vũ khí
+    local currentTool = char:FindFirstChildOfClass("Tool")
+    if not currentTool then
+        -- Ưu tiên tìm vũ khí trong Backpack (Tool không phải kỹ năng hồi máu)
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and not (IsHealingTool and IsHealingTool(tool)) then
+                pcall(function()
+                    hum:EquipTool(tool)
+                end)
+                break
+            end
+        end
+    end
+end
+
+local function AttackWithWeapon(targetPos)
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool then
+        pcall(function() tool:Activate() end)
+    end
+
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    if remotes and remotes:FindFirstChild("weaponUsed") then
+        pcall(function()
+            remotes.weaponUsed:FireServer(targetPos)
+        end)
+    end
+end
+
 local function ProcessAutoEquip()
     if not Config.AutoEquipBest then return end
 
-    local remotes = ReplicatedStorage:FindFirstChild("remotes")
-    local equipRemote = remotes and remotes:FindFirstChild("equipItem")
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local char = LocalPlayer.Character
+    -- 1. Luôn đảm bảo cầm vũ khí trên tay
+    EnsureWeaponEquipped()
 
-    -- 1. Đảm bảo toàn bộ Ability trong Backpack được trang bị lên nhân vật
-    if backpack and char then
-        for _, tool in pairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") then
-                pcall(function()
-                    tool.Parent = char
-                end)
+    -- 2. Tự động kiểm tra trang bị tốt nhất trong Túi đồ (Inventory)
+    local invGui = PlayerGui:FindFirstChild("inventory")
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+
+    if invGui then
+        -- Quét qua các nút Equip trong giao diện Inventory
+        for _, desc in pairs(invGui:GetDescendants()) do
+            if desc:IsA("GuiButton") and desc.Visible then
+                local name = desc.Name:lower()
+                local text = (desc:IsA("TextButton") and desc.Text:lower()) or ""
+                if name == "equipbutton" or name == "equip" or text == "equip" or text:find("trang bị") then
+                    ClickButton(desc)
+                    task.wait(0.08)
+                end
             end
         end
     end
 
-    -- 2. Quét Remote equipItem nếu có item level cao hơn
-    local invGui = PlayerGui:FindFirstChild("inventory")
-    if invGui and invGui.Enabled and equipRemote then
-        local invScroll = invGui:FindFirstChild("itemScrollingFrame", true)
-        if invScroll then
-            for _, itemCard in pairs(invScroll:GetChildren()) do
-                local equipBtn = itemCard:FindFirstChild("equipButton", true)
-                if equipBtn and equipBtn:IsA("GuiButton") and equipBtn.Text:lower():find("equip") then
-                    ClickButton(equipBtn)
-                    task.wait(0.1)
-                end
-            end
-        end
+    -- Thử kích hoạt remote equipSet nếu game có hỗ trợ
+    if remotes and remotes:FindFirstChild("equipSet") then
+        pcall(function() remotes.equipSet:FireServer() end)
     end
 end
 
@@ -875,6 +906,10 @@ local function ProcessSmartCombat()
             local safePos = mobRoot.Position + Vector3.new(0, targetHeight, 0)
             root.CFrame = CFrame.new(safePos, mobRoot.Position)
             root.AssemblyLinearVelocity = Vector3.zero
+
+            -- Cầm vũ khí vào tay và chém quái
+            EnsureWeaponEquipped()
+            AttackWithWeapon(mobRoot.Position)
 
             -- Xả chiêu thức thông minh (Tự đổi 2 bộ skill khi hồi chiêu)
             CastAllAbilities(isBossTarget, livingMobs, healthPercent)
