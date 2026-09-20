@@ -7,6 +7,7 @@ end
 getgenv().MCP_Loaded = true
 
 local request = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request)
+local WebSocket = WebSocket or websocket or (syn and syn.websocket)
 
 local BridgeURL = getgenv().BridgeURL or getgenv().bridgeurl or ... or "127.0.0.1:16384"
 getgenv().BridgeURL = BridgeURL
@@ -311,38 +312,24 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
     function WebSocketBridge.new()
         local self = setmetatable({}, WebSocketBridge)
     
-        --// Yield until the server is alive with exponential backoff \\--
-        local retryDelay = 0.5
-        local maxRetryDelay = 5
-        local maxAttempts = 10
-        local attempts = 0
-        
-        while not self:IsAlive() do
-            attempts += 1
-            if attempts >= maxAttempts then
-                error("Failed to connect to bridge server after " .. maxAttempts .. " attempts")
-            end
-            task.wait(retryDelay)
-            retryDelay = math.min(retryDelay * 1.5, maxRetryDelay)
-        end
-    
-        --// Connect to the server with timeout \\--
+        --// Connect directly to WebSocket \\--
         local wsConnection = nil
-        local connectionThread = task.spawn(function()
+        local lastError = ""
+        for attempt = 1, 6 do
             local success, result = pcall(function()
                 return WebSocket.connect("ws://" .. BridgeURL)
             end)
-            if success then
+            if success and result then
                 wsConnection = result
+                break
+            else
+                lastError = tostring(result)
             end
-        end)
-        
-        local connectionStart = os.clock()
-        repeat task.wait(0.05) until wsConnection ~= nil or os.clock() - connectionStart > 5
+            task.wait(0.5)
+        end
         
         if wsConnection == nil then
-            task.cancel(connectionThread)
-            error("WebSocket connection timed out after 5 seconds")
+            error("WebSocket connection failed to ws://" .. BridgeURL .. ": " .. tostring(lastError))
         end
         
         self.WebSocket = wsConnection
@@ -350,34 +337,10 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
         self.Callbacks = {}
         self.ClientId = nil
 
+        print("[Roblox-MCP] WebSocket connected to ws://" .. BridgeURL .. "! Registering client...")
+
         --// Send registration \\--
         self.WebSocket:Send(HttpService:JSONEncode(GetRegistrationInfo()))
-
-        self.AliveThread = task.spawn(function()
-            local consecutiveFailures = 0
-            while task.wait(1) do
-                if not self.Connected then
-                    continue
-                end
-
-                if self:IsAlive() then
-                    consecutiveFailures = 0
-                    continue
-                end
-
-                consecutiveFailures += 1
-                if consecutiveFailures < 3 then
-                    continue
-                end
-                
-                self.Connected = false
-                break
-            end
-    
-            pcall(function()
-                self.WebSocket:Close()
-            end)
-        end)
     
         --// On Message \\--
         self.WebSocket.OnMessage:Connect(function(message)
@@ -539,11 +502,14 @@ local function CreateBridge()
             return WebSocketBridge.new()
         end)
         
-        if success then
+        if success and bridge then
             return bridge
+        else
+            warn("[Roblox-MCP] WebSocket failed: " .. tostring(bridge) .. ", trying HTTP polling fallback...")
         end
     end
 
+    print("[Roblox-MCP] Connecting via HTTP polling fallback...")
     return HTTPBridge.new()
 end
 
