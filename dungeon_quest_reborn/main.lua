@@ -839,11 +839,18 @@ local function IsDangerousAoE(part, rootPos)
     return false
 end
 
--- Nhận diện kỹ năng Hồi Máu
-local HEAL_KEYWORDS = {"heal", "rejuvenat", "aura of life", "redemption", "inner sanctum", "splash"}
+-- Nhận diện kỹ năng Hồi Máu / Hộ thuẫn
+local HEAL_KEYWORDS = {"heal", "rejuvenat", "aura of life", "redemption", "inner sanctum", "holy circle", "holy barrier", "splash", "life pulse"}
 local function IsHealingTool(tool)
     if not tool then return false end
-    local name = tool.Name:lower()
+    local name = ""
+    if typeof(tool) == "Instance" then
+        name = tool.Name:lower()
+    elseif type(tool) == "table" then
+        name = tostring(tool.name or tool.Name or ""):lower()
+    else
+        name = tostring(tool):lower()
+    end
     for _, kw in ipairs(HEAL_KEYWORDS) do
         if name:find(kw) then return true end
     end
@@ -898,6 +905,210 @@ local function AreCurrentSkillsOnCooldown()
     local rightBtn = abilitiesGui:FindFirstChild("RightAbility", true)
 
     return IsOnCooldown(leftBtn) and IsOnCooldown(rightBtn)
+end
+
+--------------------------------------------------------------------------------
+-- 9. DYNAMIC SKILL & WEAPON RANGE SYSTEM (TÍNH CỰ LI CỦA TỪNG CHIÊU)
+--------------------------------------------------------------------------------
+
+local SKILL_RANGE_PROFILES = {
+    MeleeAoE = {
+        name = "Cận chiến diện rộng (Xoay 360°)",
+        minSafe = 6.8,       -- Quái đánh thường tới ~5.2 studs. Ở 6.8 studs quái đánh hụt 100%.
+        maxCast = 8.8,       -- Tầm xoay Whirlwind ~9.0 studs. Ở 8.8 studs đòn xoay trúng 100%.
+        preferred = 7.5,     -- Cự ly vàng lý tưởng.
+        emergencyDodge = 5.6,
+        isRanged = false,
+        isHeal = false,
+    },
+    MeleeStrike = {
+        name = "Cận chiến chém đơn mục tiêu",
+        minSafe = 6.6,
+        maxCast = 8.2,
+        preferred = 7.2,
+        emergencyDodge = 5.5,
+        isRanged = false,
+        isHeal = false,
+    },
+    GroundSlam = {
+        name = "Đập đất / Chấn động",
+        minSafe = 7.5,
+        maxCast = 11.5,
+        preferred = 9.0,
+        emergencyDodge = 5.8,
+        isRanged = false,
+        isHeal = false,
+    },
+    Ranged = {
+        name = "Phép thuật / Đòn tầm xa",
+        minSafe = 14.0,      -- Quái cận chiến hoàn toàn bất lực không thể tới gần.
+        maxCast = 22.0,      -- Tầm bắn chuẩn xác.
+        preferred = 17.0,    -- Cự ly vàng tầm xa.
+        emergencyDodge = 9.5,
+        isRanged = true,
+        isHeal = false,
+    },
+    Support = {
+        name = "Hồi máu / Hộ thuẫn",
+        minSafe = nil,
+        maxCast = 999,
+        preferred = nil,
+        emergencyDodge = nil,
+        isRanged = false,
+        isHeal = true,
+    },
+}
+
+-- Phân loại và tính cự li của một kỹ năng dựa trên tên và đặc tính của nó
+local function CalculateSkillRange(skillName, toolInstance)
+    local name = tostring(skillName or (toolInstance and toolInstance.Name) or ""):lower()
+
+    if toolInstance and typeof(toolInstance) == "Instance" then
+        if toolInstance:FindFirstChild("fireballShootEvent") then
+            return SKILL_RANGE_PROFILES.Ranged
+        end
+        if toolInstance:FindFirstChild("holyCircleEvent") or toolInstance:FindFirstChild("absorbEvent") then
+            return SKILL_RANGE_PROFILES.Support
+        end
+    end
+
+    -- 1. Hồi máu / Buff hỗ trợ (Không giới hạn cự ly tới quái)
+    local healKeywords = {"heal", "rejuvenat", "aura of life", "redemption", "inner sanctum", "holy circle", "holy barrier", "innervate", "blessing", "roar", "taunt", "berserk", "life pulse", "splash"}
+    for _, kw in ipairs(healKeywords) do
+        if name:find(kw) then
+            return SKILL_RANGE_PROFILES.Support
+        end
+    end
+
+    -- 2. Cận chiến xoay 360 độ (Whirlwind, Blade Storm, Revolver, Cyclone...)
+    local meleeAoeKeywords = {"whirlwind", "blade storm", "revolver", "spinning", "flame cyclone", "gale slice", "rending slice", "ghostly rampage", "spiral", "sweep"}
+    for _, kw in ipairs(meleeAoeKeywords) do
+        if name:find(kw) then
+            return SKILL_RANGE_PROFILES.MeleeAoE
+        end
+    end
+
+    -- 3. Đập đất / Chấn động trung bình (Ground Slam, Stomp, Earth Kick, Nova...)
+    local groundKeywords = {"slam", "stomp", "smash", "earth kick", "earth clap", "ice nova", "electric field", "electric boom", "totem", "burst", "quake", "tremor"}
+    for _, kw in ipairs(groundKeywords) do
+        if name:find(kw) then
+            return SKILL_RANGE_PROFILES.GroundSlam
+        end
+    end
+
+    -- 4. Kỹ năng tầm xa / Bắn chưởng / Phóng đạn
+    local rangedKeywords = {"fireball", "bolt", "blast", "beam", "ray", "spray", "needles", "missile", "arrow", "shot", "shuriken", "throw", "cannon", "bomb", "orb", "barrage", "pulse", "tsunami", "vortex", "flames", "spikes", "icicle", "shards", "cloud", "lightning", "poison"}
+    for _, kw in ipairs(rangedKeywords) do
+        if name:find(kw) then
+            return SKILL_RANGE_PROFILES.Ranged
+        end
+    end
+
+    -- 5. Chém / Đánh cận chiến đơn mục tiêu
+    local strikeKeywords = {"strike", "slash", "blow", "lash", "stab", "thrust", "crush", "punch", "kick", "bite", "cleave"}
+    for _, kw in ipairs(strikeKeywords) do
+        if name:find(kw) then
+            return SKILL_RANGE_PROFILES.MeleeStrike
+        end
+    end
+
+    -- Mặc định fallback theo chỉ số hiện tại
+    local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
+    local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
+    return (sp >= pp) and SKILL_RANGE_PROFILES.Ranged or SKILL_RANGE_PROFILES.MeleeAoE
+end
+
+-- Tính cự ly của Vũ khí đang cầm (Đánh thường)
+local function GetEquippedWeaponRange()
+    local weaponName = LocalPlayer:FindFirstChild("weaponEquipped") and LocalPlayer.weaponEquipped.Value or ""
+    local name = weaponName:lower()
+
+    local isRanged = name:find("wand") or name:find("staff") or name:find("orb") or name:find("bow") or name:find("crossbow") or name:find("gun")
+    if isRanged then
+        return SKILL_RANGE_PROFILES.Ranged
+    else
+        return SKILL_RANGE_PROFILES.MeleeStrike
+    end
+end
+
+-- Xác định cự ly chiến đấu động tối ưu dựa trên từng chiêu đang trang bị & thời gian hồi chiêu
+local function GetDynamicCombatProfile(currentDist)
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local leftBtn = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true)
+    local rightBtn = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true)
+
+    local qTool, eTool = nil, nil
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") then
+                local slotVal = t:FindFirstChild("abilitySlot") and t.abilitySlot.Value:lower()
+                if slotVal == "q" then
+                    qTool = t
+                elseif slotVal == "e" then
+                    eTool = t
+                end
+            end
+        end
+    end
+
+    local qName = qTool and qTool.Name or "Skill Q"
+    local eName = eTool and eTool.Name or "Skill E"
+
+    local qRange = CalculateSkillRange(qName, qTool)
+    local eRange = CalculateSkillRange(eName, eTool)
+    local weaponRange = GetEquippedWeaponRange()
+
+    local qCooldown = IsOnCooldown(leftBtn) or (qTool and qTool:FindFirstChild("cooldown") and qTool.cooldown.Value > 0.1)
+    local eCooldown = IsOnCooldown(rightBtn) or (eTool and eTool:FindFirstChild("cooldown") and eTool.cooldown.Value > 0.1)
+
+    -- Thu thập danh sách chiêu thức sát thương ĐANG SẴN SÀNG (không bị hồi chiêu)
+    local readyDamagingSkills = {}
+    if not qCooldown and not qRange.isHeal then
+        table.insert(readyDamagingSkills, {name = qName, profile = qRange, slot = "Q", tool = qTool})
+    end
+    if not eCooldown and not eRange.isHeal then
+        table.insert(readyDamagingSkills, {name = eName, profile = eRange, slot = "E", tool = eTool})
+    end
+
+    -- Chọn profile chiến đấu phù hợp nhất:
+    local chosenProfile = nil
+    local activeSkillInfo = ""
+
+    if #readyDamagingSkills == 0 then
+        -- CẢ 2 CHIÊU ĐỀU ĐANG HỒI (hoặc chỉ có chiêu Hồi máu):
+        -- Dùng cự ly của Vũ khí đánh thường (Wand bắn xa 17m hoặc Kiếm chém 7.2m)
+        chosenProfile = weaponRange
+        activeSkillInfo = string.format("Vũ khí [%s]", chosenProfile.isRanged and "Tầm xa" or "Cận chiến")
+    else
+        -- CÓ CHIÊU SẴN SÀNG:
+        local hasMeleeReady = nil
+        local hasRangedReady = nil
+
+        for _, item in ipairs(readyDamagingSkills) do
+            if item.profile.isRanged then
+                hasRangedReady = item
+            else
+                hasMeleeReady = item
+            end
+        end
+
+        if hasRangedReady and (not hasMeleeReady or (currentDist and currentDist > 12)) then
+            chosenProfile = hasRangedReady.profile
+            activeSkillInfo = string.format("%s (Chiêu %s - Tầm xa: %dm)", hasRangedReady.name, hasRangedReady.slot, math.floor(chosenProfile.preferred))
+        elseif hasMeleeReady then
+            chosenProfile = hasMeleeReady.profile
+            activeSkillInfo = string.format("%s (Chiêu %s - Cận chiến: %.1fm)", hasMeleeReady.name, hasMeleeReady.slot, chosenProfile.preferred)
+        else
+            chosenProfile = readyDamagingSkills[1].profile
+            activeSkillInfo = string.format("%s (Chiêu %s)", readyDamagingSkills[1].name, readyDamagingSkills[1].slot)
+        end
+    end
+
+    return chosenProfile, activeSkillInfo, {
+        q = {name = qName, onCd = qCooldown, range = qRange},
+        e = {name = eName, onCd = eCooldown, range = eRange},
+    }
 end
 
 -- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast)
@@ -1044,19 +1255,29 @@ local function GetAllDungeonEnemies()
 end
 
 local lastAbilityCastTime = 0
-local function CastAllAbilities(isBoss, mobCount, healthPercent)
+local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist)
     if not Config.AutoSpamSkills then return end
     local now = os.clock()
     if now - lastAbilityCastTime < 0.2 then return end
     lastAbilityCastTime = now
 
-    -- 1. Kích hoạt chiêu thức trực tiếp trong Backpack (Bao gồm Fireball, Spell, v.v.)
+    -- 1. Kích hoạt chiêu thức trực tiếp trong Backpack theo cự ly chuẩn xác của chiêu đó
     local bp = LocalPlayer:FindFirstChild("Backpack")
     if bp then
         for _, tool in ipairs(bp:GetChildren()) do
             if tool:IsA("Tool") then
-                local isHeal = IsHealingTool and IsHealingTool(tool)
-                if (isHeal and healthPercent < 0.75) or (not isHeal) then
+                local rangeProfile = CalculateSkillRange(tool.Name, tool)
+                local canCast = true
+                if rangeProfile.isHeal then
+                    canCast = (healthPercent < 0.75)
+                else
+                    -- Không xả chiêu khi quái ở ngoài tầm đánh (tránh đánh gió / lãng phí cooldown)
+                    if targetDist and rangeProfile.maxCast and targetDist > (rangeProfile.maxCast + 2.0) then
+                        canCast = false
+                    end
+                end
+
+                if canCast then
                     local localEvt = tool:FindFirstChild("localEvent")
                     if localEvt and localEvt:IsA("BindableEvent") then
                         pcall(function() localEvt:Fire() end)
@@ -1166,23 +1387,18 @@ local function ProcessSmartCombat()
     local enemyMaxHp = math.floor(mobHum.MaxHealth)
     isBossTarget = (mobHum.MaxHealth > 10000) or (targetMob.Name:lower():find("boss") ~= nil)
 
-    -- Xác định lớp nhân vật để tính cự ly tối ưu
-    local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
-    local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
-    local isMage = (sp >= pp)
+    -- 3. TÍNH TOÁN CỰ LI CHIẾN ĐẤU ĐỘNG THEO TỪNG CHIÊU THỨC & VŨ KHÍ HIỆN TẠI
+    local combatProfile, activeSkillInfo, skillsDebug = GetDynamicCombatProfile(dist)
+    local safeMinDist = combatProfile.minSafe or 7.0
+    local safeMaxDist = combatProfile.maxCast or 9.0
+    local preferredDist = combatProfile.preferred or 7.5
+    local emergencyDodgeDist = combatProfile.emergencyDodge or 5.6
 
-    -- CỰ LY VÀNG NÉ 100% ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
-    -- Tầm đánh thường của quái cận chiến là ~5-6 studs.
-    -- Để không bao giờ bị trúng đòn thường:
-    -- Mage / Pháp sư: Cự ly an toàn tối thiểu là 14 studs, cự ly xả skill tối đa là 18 studs.
-    -- Warrior / Chiến binh: Cự ly an toàn tối thiểu là 7.5 studs, cự ly đánh là 9.5 studs.
-    local safeMinDist = isMage and (Config.KiteDistanceMage or 14) or (Config.KiteDistanceWarrior or 7.5)
-    local safeMaxDist = isMage and (Config.CombatRangeMage or 18) or (Config.CombatRangeWarrior or 9.5)
-
-    -- Khi máu thấp (< 40%): Lùi thêm 5 studs an toàn để hồi phục
+    -- Khi máu thấp (< 40%): Lùi thêm 4 studs an toàn để hồi phục
     if healthPercent < 0.4 then
-        safeMinDist = safeMinDist + 5
-        safeMaxDist = safeMaxDist + 5
+        safeMinDist = safeMinDist + 4
+        safeMaxDist = safeMaxDist + 4
+        preferredDist = preferredDist + 4
     end
 
     -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
@@ -1220,7 +1436,7 @@ local function ProcessSmartCombat()
         end
     end
 
-    -- 3. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH
+    -- 4. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH THEO CỰ LI CHIÊU
     if dist < safeMinDist then
         -- A. QUÁ GẦN: ĐI LÙI NGAY LẬP TỨC ĐỂ NÉ ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
         hum.AutoRotate = false
@@ -1229,11 +1445,12 @@ local function ProcessSmartCombat()
         local chosenMoveTarget = nil
 
         if backClear or backDist > 4.0 then
-            -- Phía sau thông thoáng: Lùi dứt khoát 10 studs
-            chosenMoveTarget = root.Position + awayDir * 10
-            State.CurrentStatus = string.format("🔄 Đi lùi né đòn đánh thường của %s (Cách: %dm)", targetMob.Name, math.floor(dist))
-            -- Nhảy lùi khẩn cấp nếu quái quá gần (< 8 studs) đang chuẩn bị vung tay
-            if dist < 8 then
+            -- Phía sau thông thoáng: Lùi dứt khoát
+            local backStep = combatProfile.isRanged and 10 or 6
+            chosenMoveTarget = root.Position + awayDir * backStep
+            State.CurrentStatus = string.format("🔄 Đi lùi né đánh thường [%s] (Cách: %.1fm)", activeSkillInfo, dist)
+            -- Nhảy lùi khẩn cấp chỉ khi quái áp sát nguy hiểm vào vùng đánh trúng
+            if dist < emergencyDodgeDist then
                 hum.Jump = true
             end
         else
@@ -1241,31 +1458,29 @@ local function ProcessSmartCombat()
             local leftClear, leftDist = CheckDirectionClear(root.Position, leftDir, 5)
             local rightClear, rightDist = CheckDirectionClear(root.Position, rightDir, 5)
             local chosenDir = (leftDist >= rightDist) and leftDir or rightDir
-            chosenMoveTarget = root.Position + chosenDir * 8
-            State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe): %s", targetMob.Name)
+            chosenMoveTarget = root.Position + chosenDir * 7
+            State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe) [%s]", activeSkillInfo)
         end
 
         hum:MoveTo(chosenMoveTarget)
 
     elseif dist <= safeMaxDist then
-        -- B. CỰ LY VÀNG (14 - 18 studs): Vừa xa tầm đánh của quái vừa trúng tầm skill!
-        -- Vì quái luôn chạy đuổi theo nhân vật, nhân vật VỪA LÙI VỪA STRAFE để duy trì khoảng cách!
+        -- B. CỰ LY VÀNG: Vừa xa tầm đánh của quái vừa trúng tầm skill!
         hum.AutoRotate = false
         local strafePart = (strafeSign > 0) and leftDir or rightDir
         local maintainDir = (awayDir * 0.7 + strafePart * 0.4).Unit
 
-        State.CurrentStatus = string.format("⚔️ Giữ cự ly vàng & xả skill: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
-        hum:MoveTo(root.Position + maintainDir * 5)
+        State.CurrentStatus = string.format("⚔️ Cự ly vàng [%s] (Cách: %.1fm | Quái HP: %d/%d)", activeSkillInfo, dist, enemyHp, enemyMaxHp)
+        hum:MoveTo(root.Position + maintainDir * 4)
 
     else
         -- C. Ở XA: Tiếp cận quái
-        if dist <= 25 then
-            -- Trong cự ly gần: Bước tới nhẹ
+        local closeApproachDist = safeMaxDist + 5
+        if dist <= closeApproachDist then
             hum.AutoRotate = true
-            hum:MoveTo(root.Position - awayDir * 5)
+            hum:MoveTo(root.Position - awayDir * 4)
         else
-            -- Ở xa hẳn: Tiếp cận bằng đường thẳng hoặc NavMesh Waypoints nếu có vật cản
-            State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
+            State.CurrentStatus = string.format("🏃 Tiếp cận %s [%s] (Cách: %dm | HP: %d/%d)", targetMob.Name, activeSkillInfo, math.floor(dist), enemyHp, enemyMaxHp)
             hum.AutoRotate = true
             local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
             if hasLOS then
@@ -1276,14 +1491,14 @@ local function ProcessSmartCombat()
         end
     end
 
-    -- 4. ĐÁNH THƯỜNG VỚI VŨ KHÍ (Khi trong tầm đánh 25 studs cho Wand)
-    local attackMaxDist = isMage and 25 or 9
-    if dist <= attackMaxDist then
+    -- 5. ĐÁNH THƯỜNG VỚI VŨ KHÍ
+    local weaponAttackRange = (combatProfile.isRanged or GetEquippedWeaponRange().isRanged) and 24 or 8.5
+    if dist <= weaponAttackRange then
         AttackWithWeapon(mobRoot.Position)
     end
 
-    -- 5. XẢ SKILL THÔNG MINH (Chiêu Q, E, Túi đồ Backpack & Đổi bộ kỹ năng 2)
-    CastAllAbilities(isBossTarget, livingMobs, healthPercent)
+    -- 6. XẢ SKILL THÔNG MINH (Chỉ xả khi quái trong cự ly hữu hiệu của từng chiêu)
+    CastAllAbilities(isBossTarget, livingMobs, healthPercent, dist)
 end
 
 --------------------------------------------------------------------------------
