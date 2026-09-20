@@ -845,53 +845,81 @@ local function GetDungeonWaypoints(startPos, endPos)
     return nil
 end
 
+local function GetAllDungeonEnemies()
+    local mobs = {}
+    local dung = workspace:FindFirstChild("dungeon")
+    if dung then
+        for _, room in ipairs(dung:GetChildren()) do
+            local ef = room:FindFirstChild("enemyFolder") or (room.Name == "enemyFolder" and room)
+            if ef then
+                for _, mob in ipairs(ef:GetChildren()) do
+                    local hum = mob:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        table.insert(mobs, mob)
+                    end
+                end
+            end
+        end
+    end
+
+    local efLegacy = workspace:FindFirstChild("enemies") or workspace:FindFirstChild("enemyFolder")
+    if efLegacy then
+        for _, mob in ipairs(efLegacy:GetChildren()) do
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                table.insert(mobs, mob)
+            end
+        end
+    end
+
+    if #mobs == 0 and dung then
+        for _, desc in ipairs(dung:GetDescendants()) do
+            if desc:IsA("Humanoid") and desc.Health > 0 and desc.Parent ~= LocalPlayer.Character then
+                table.insert(mobs, desc.Parent)
+            end
+        end
+    end
+
+    return mobs
+end
+
 local function CastAllAbilities(isBoss, mobCount, healthPercent)
     if not Config.AutoSpamSkills then return end
 
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    -- 1. ƯU TIÊN SỐ 1: HỒI MÁU KHI MÁU < 75%
-    if healthPercent < 0.75 then
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") and IsHealingTool(tool) then
-                local shootEvent = tool:FindFirstChild("fireballShootEvent") or tool:FindFirstChild("spellEvent") or tool:FindFirstChild("abilityEvent")
-                if shootEvent and shootEvent:IsA("RemoteEvent") then
-                    pcall(function() shootEvent:FireServer() end)
-                end
-                local localEvt = tool:FindFirstChild("localEvent")
-                if localEvt and localEvt:IsA("BindableEvent") then
-                    pcall(function() localEvt:Fire() end)
+    -- 1. Kích hoạt chiêu thức trực tiếp trong Backpack (Bao gồm Fireball, Spell, v.v.)
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") then
+                local isHeal = IsHealingTool and IsHealingTool(tool)
+                if (isHeal and healthPercent < 0.75) or (not isHeal) then
+                    local localEvt = tool:FindFirstChild("localEvent")
+                    if localEvt and localEvt:IsA("BindableEvent") then
+                        pcall(function() localEvt:Fire() end)
+                    end
                 end
             end
         end
     end
 
-    -- 2. XẢ CHIÊU TẤN CÔNG BỘ HIỆN TẠI
-    for _, tool in pairs(char:GetChildren()) do
-        if tool:IsA("Tool") and not IsHealingTool(tool) then
-            local shootEvent = tool:FindFirstChild("fireballShootEvent") or tool:FindFirstChild("spellEvent") or tool:FindFirstChild("abilityEvent")
-            if shootEvent and shootEvent:IsA("RemoteEvent") then
-                pcall(function() shootEvent:FireServer() end)
-            end
-            local localEvt = tool:FindFirstChild("localEvent")
-            if localEvt and localEvt:IsA("BindableEvent") then
-                pcall(function() localEvt:Fire() end)
-            end
-        end
-    end
+    -- 2. Kích hoạt kỹ năng Q và E qua GUI Button signals (100% không đụng tới chuột)
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local leftBtn = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true) and abilitiesGui.LeftAbility:FindFirstChildWhichIsA("GuiButton", true)
+    local rightBtn = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true) and abilitiesGui.RightAbility:FindFirstChildWhichIsA("GuiButton", true)
 
-    -- Kích hoạt remote abilityCast
+    if leftBtn then ClickButton(leftBtn) end
+    if rightBtn then ClickButton(rightBtn) end
+
+    -- 3. Kích hoạt remote abilityCast
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
     if remotes and remotes:FindFirstChild("abilityCast") then
         pcall(function()
             remotes.abilityCast:FireServer(1)
             remotes.abilityCast:FireServer(2)
-            remotes.abilityCast:FireServer(3)
         end)
     end
 
-    -- 3. NẾU 2 CHIÊU BỘ HIỆN TẠI ĐANG HỒI: TỰ ĐỘNG SWAP SANG BỘ THỨ 2 ĐỂ XẢ TIẾP
+    -- 4. Nếu cả 2 chiêu đang hồi: Tự động đổi sang bộ kỹ năng thứ 2 để xả tiếp
     if AreCurrentSkillsOnCooldown() then
         SwapAbilitySet()
     end
@@ -901,60 +929,27 @@ local function ProcessSmartCombat()
     if not Config.KillAura then return end
     if IsInLobby() then return end
 
-    local enemiesFolder = workspace:FindFirstChild("enemies")
-    if not enemiesFolder or #enemiesFolder:GetChildren() == 0 then return end
-
+    local allMobs = GetAllDungeonEnemies()
     local root = GetRootPart()
     local hum = GetHumanoid()
     local char = LocalPlayer.Character
-    if not root or not hum or hum.Health <= 0 then return end
+
+    if #allMobs == 0 or not root or not hum or hum.Health <= 0 then return end
 
     local healthPercent = hum.Health / hum.MaxHealth
 
-    -- Kiểm tra né chiêu Boss
-    local inDanger = false
-    for _, obj in pairs(workspace:GetChildren()) do
-        if IsDangerousAoE(obj, root.Position) then
-            inDanger = true
-            break
-        end
-    end
-
-    -- Phân loại mục tiêu ưu tiên: Quái Bắn Xa > Boss > Cận Chiến
+    -- 1. Lọc quái vật: Ưu tiên quái ở gần nhất trong phạm vi hợp lệ (không nhảy cóc qua phòng bị khóa)
     local targetMob = nil
     local shortestDist = math.huge
-    local livingMobs = 0
+    local livingMobs = #allMobs
     local isBossTarget = false
     local isRangedTarget = false
 
-    local rangedList = {}
-    local bossList = {}
-    local meleeList = {}
-
-    for _, mob in pairs(enemiesFolder:GetChildren()) do
-        local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
+    -- Ưu tiên quái có tầm nhìn hoặc trong bán kính 60 studs gần nhất
+    for _, mob in ipairs(allMobs) do
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
-        if mobRoot and mobHum and mobHum.Health > 0 then
-            livingMobs = livingMobs + 1
-            if IsRangedEnemy(mob) then
-                table.insert(rangedList, mob)
-            elseif mob.Name:lower():find("boss") or (mobHum.MaxHealth > 10000) then
-                table.insert(bossList, mob)
-            else
-                table.insert(meleeList, mob)
-            end
-        end
-    end
-
-    State.EnemiesRemaining = livingMobs
-
-    local selectedCategory = (#rangedList > 0 and rangedList) or (#bossList > 0 and bossList) or meleeList
-    if selectedCategory == rangedList then isRangedTarget = true end
-    if selectedCategory == bossList then isBossTarget = true end
-
-    for _, mob in pairs(selectedCategory) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
-        if mobRoot then
+        if mobHum and mobHum.Health > 0 and mobRoot then
             local dist = (mobRoot.Position - root.Position).Magnitude
             if dist < shortestDist then
                 shortestDist = dist
@@ -963,49 +958,33 @@ local function ProcessSmartCombat()
         end
     end
 
+    State.EnemiesRemaining = livingMobs
+
     if targetMob then
         local mobRoot = targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")
-        if mobRoot then
-            local targetHeight = Config.SafeHoverHeight
+        local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local dist = (mobRoot.Position - root.Position).Magnitude
+            local enemyHp = math.floor(mobHum.Health)
+            local enemyMaxHp = math.floor(mobHum.MaxHealth)
 
-            -- Kiểm tra xem có tường đá / cửa ngăn cách không (Line of Sight)
-            local hasLoS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
+            State.CurrentStatus = string.format("⚔️ Diệt quái: %s (HP: %d/%d | Cách: %dm)", targetMob.Name, enemyHp, enemyMaxHp, math.floor(dist))
 
-            if not hasLoS and (root.Position - mobRoot.Position).Magnitude > 25 then
-                -- Bị tường che: Sử dụng 3D NavMesh Pathfinding tìm đường qua hành lang
-                State.CurrentStatus = "🧭 Đang luồn qua hành lang đến phòng quái (Pathfinding)..."
+            -- Di chuyển an toàn bằng Humanoid:MoveTo để 100% không bị Server Anti-Cheat phát hiện
+            if dist > 12 then
                 local waypoints = GetDungeonWaypoints(root.Position, mobRoot.Position)
                 if waypoints and #waypoints > 1 then
-                    local nextPoint = waypoints[2].Position + Vector3.new(0, targetHeight, 0)
-                    root.CFrame = CFrame.new(nextPoint, mobRoot.Position)
-                    root.AssemblyLinearVelocity = Vector3.zero
-                    return
+                    hum:MoveTo(waypoints[2].Position)
+                else
+                    hum:MoveTo(mobRoot.Position)
                 end
-            end
-
-            -- Khi đã có tầm nhìn rõ ràng:
-            if inDanger then
-                targetHeight = Config.SafeHoverHeight + 6
-                State.CurrentStatus = "🛡️ Đang né chiêu diện rộng của Boss!"
-                root.AssemblyLinearVelocity = Vector3.new(16, 0, 16)
-            elseif healthPercent < 0.35 then
-                targetHeight = Config.SafeHoverHeight + 6
-                State.CurrentStatus = string.format("⚡ Máu yếu (%.0f%%)! Đang giữ khoảng cách & xả skill dứt điểm!", healthPercent * 100)
             else
-                local targetType = isRangedTarget and "Quái Bắn Xa" or (isBossTarget and "BOSS" or "Quái Cận Chiến")
-                State.CurrentStatus = string.format("⚔️ Diệt %s: %s (Cách: %dm)", targetType, targetMob.Name, math.floor(shortestDist))
+                -- Khi đã ở cự ly gần: Tiếp cận và duy trì khoảng cách tấn công
+                hum:MoveTo(mobRoot.Position)
             end
 
-            -- Giữ độ cao an toàn trên đầu quái
-            local safePos = mobRoot.Position + Vector3.new(0, targetHeight, 0)
-            root.CFrame = CFrame.new(safePos, mobRoot.Position)
-            root.AssemblyLinearVelocity = Vector3.zero
-
-            -- Cầm vũ khí vào tay và chém quái
-            EnsureWeaponEquipped()
+            -- Chém vũ khí & Xả chiêu thức thông minh qua Remote/Bindable
             AttackWithWeapon(mobRoot.Position)
-
-            -- Xả chiêu thức thông minh (Tự đổi 2 bộ skill khi hồi chiêu)
             CastAllAbilities(isBossTarget, livingMobs, healthPercent)
         end
     end
