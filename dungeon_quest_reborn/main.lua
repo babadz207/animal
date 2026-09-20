@@ -188,7 +188,7 @@ local function ClickButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
     local clicked = false
 
-    -- 1. getconnections (Mạnh nhất trên Roblox Executor: kích hoạt chính xác function lắng nghe Activated, MouseButton1Down/Up)
+    -- 1. getconnections (Kích hoạt chính xác function lắng nghe Activated, MouseButton1Down/Up/Click mà KHÔNG can thiệp chuột thật)
     if getconnections then
         for _, evt in ipairs({"Activated", "MouseButton1Down", "MouseButton1Up", "MouseButton1Click"}) do
             local conns = getconnections(btn[evt])
@@ -211,32 +211,6 @@ local function ClickButton(btn)
                 clicked = true
             end)
         end
-    end
-
-    -- 3. VirtualInputManager (Click vật lý theo tọa độ chuẩn xác trên màn hình)
-    pcall(function()
-        local pos = btn.AbsolutePosition
-        local size = btn.AbsoluteSize
-        local cx = pos.X + size.X / 2
-        local cy = pos.Y + size.Y / 2
-        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-        task.wait(0.04)
-        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-        clicked = true
-    end)
-
-    -- 4. VirtualUser fallback
-    if not clicked then
-        pcall(function()
-            local pos = btn.AbsolutePosition
-            local size = btn.AbsoluteSize
-            local cx = pos.X + size.X / 2
-            local cy = pos.Y + size.Y / 2
-            VirtualUser:Button1Down(Vector2.new(cx, cy))
-            task.wait(0.04)
-            VirtualUser:Button1Up(Vector2.new(cx, cy))
-            clicked = true
-        end)
     end
 
     return clicked
@@ -332,7 +306,7 @@ local function ProcessAutoEnter()
 end
 
 --------------------------------------------------------------------------------
--- 6. SMART AUTO STAT ALLOCATION (NÂNG ĐIỂM THÔNG MINH KHI LÊN LEVEL)
+-- 6. SMART AUTO STAT ALLOCATION (NÂNG ĐIỂM THÔNG MINH QUA REMOTE)
 --------------------------------------------------------------------------------
 local function ProcessAutoStats()
     if not Config.AutoStats then return end
@@ -341,8 +315,9 @@ local function ProcessAutoStats()
     if not spVal or spVal.Value <= 0 then return end
 
     local currentPoints = spVal.Value
-    local playerLvl = GetPlayerLevel()
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    local spendRemote = remotes and remotes:FindFirstChild("spendSkillPoint")
+    if not spendRemote then return end
 
     -- Phân loại Build
     local build = Config.StatBuild
@@ -356,74 +331,34 @@ local function ProcessAutoStats()
         end
     end
 
-    State.CurrentStatus = string.format("Đang nâng %d điểm (%s Build)...", currentPoints, build)
-
     -- Phân bổ điểm: 75% chỉ số chính, 25% Stamina (HP)
     local mainStat = (build == "Mage") and "spellPower" or "physicalPower"
     local mainPoints = math.max(1, math.floor(currentPoints * 0.75))
     local stamPoints = currentPoints - mainPoints
 
-    -- 1. Thử qua Remote nâng điểm
-    local statRemote = remotes and (remotes:FindFirstChild("upgradeStat") or remotes:FindFirstChild("addStatPoint") or remotes:FindFirstChild("upgradeStats"))
-    if statRemote then
-        pcall(function()
-            if mainPoints > 0 then statRemote:FireServer(mainStat, mainPoints) end
-            if stamPoints > 0 then statRemote:FireServer("stamina", stamPoints) end
-        end)
-    end
+    State.CurrentStatus = string.format("Nâng %d điểm (%s: +%d, Stamina: +%d)...", currentPoints, mainStat, mainPoints, stamPoints)
 
-    -- 2. Thử qua GUI Inventory (Nút cộng điểm +)
-    local invGui = PlayerGui:FindFirstChild("inventory")
-    if invGui then
-        local mainFrame = invGui:FindFirstChild("main") or invGui:FindFirstChild("stats")
-        if mainFrame then
-            local mainPlus = mainFrame:FindFirstChild(mainStat) and mainFrame[mainStat]:FindFirstChild("button")
-            local stamPlus = mainFrame:FindFirstChild("stamina") and mainFrame["stamina"]:FindFirstChild("button")
-
-            for i = 1, mainPoints do
-                if mainPlus then ClickButton(mainPlus) task.wait(0.02) end
-            end
-            for i = 1, stamPoints do
-                if stamPlus then ClickButton(stamPlus) task.wait(0.02) end
-            end
-        end
-    end
+    -- Remote spendSkillPoint chính xác 100% của Dungeon Quest
+    pcall(function()
+        if mainPoints > 0 then spendRemote:FireServer(mainStat, mainPoints) end
+        if stamPoints > 0 then spendRemote:FireServer("stamina", stamPoints) end
+    end)
 
     State.AllocatedPoints = State.AllocatedPoints + currentPoints
 end
 
 --------------------------------------------------------------------------------
--- 7. SMART AUTO EQUIP BEST (VŨ KHÍ, GIÁP, CHIÊU THỨC MẠNH NHẤT)
+-- 7. SMART AUTO EQUIP BEST (VŨ KHÍ, GIÁP, CHIÊU THỨC QUA GAME REMOTE 100%)
 --------------------------------------------------------------------------------
 local RARITY_SCORE = {
-    ["Common"] = 1,
-    ["Uncommon"] = 2,
-    ["Rare"] = 3,
-    ["Epic"] = 4,
-    ["Legendary"] = 5,
-    ["Mythical"] = 6,
+    ["common"] = 1,
+    ["uncommon"] = 2,
+    ["rare"] = 3,
+    ["epic"] = 4,
+    ["legendary"] = 5,
+    ["mythical"] = 6,
+    ["ultimate"] = 7,
 }
-
-local function EnsureWeaponEquipped()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not hum or not backpack then return end
-
-    -- Nếu tay chưa cầm vũ khí
-    local currentTool = char:FindFirstChildOfClass("Tool")
-    if not currentTool then
-        -- Ưu tiên tìm vũ khí trong Backpack (Tool không phải kỹ năng hồi máu)
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and not (IsHealingTool and IsHealingTool(tool)) then
-                pcall(function()
-                    hum:EquipTool(tool)
-                end)
-                break
-            end
-        end
-    end
-end
 
 local function AttackWithWeapon(targetPos)
     local char = LocalPlayer.Character
@@ -440,68 +375,227 @@ local function AttackWithWeapon(targetPos)
     end
 end
 
+local lastEquipCheck = 0
 local function ProcessAutoEquip()
     if not Config.AutoEquipBest then return end
+    if os.clock() - lastEquipCheck < 2.0 then return end
+    lastEquipCheck = os.clock()
 
-    -- 1. Luôn đảm bảo cầm vũ khí trên tay
-    EnsureWeaponEquipped()
-
-    -- 2. Tự động kiểm tra trang bị tốt nhất trong Túi đồ (Inventory)
-    local invGui = PlayerGui:FindFirstChild("inventory")
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    local reloadRemote = remotes and remotes:FindFirstChild("reloadInvy")
+    local equipRemote = remotes and remotes:FindFirstChild("equipItem")
+    if not reloadRemote or not equipRemote then return end
 
-    if invGui then
-        -- Quét qua các nút Equip trong giao diện Inventory
-        for _, desc in pairs(invGui:GetDescendants()) do
-            if desc:IsA("GuiButton") and desc.Visible then
-                local name = desc.Name:lower()
-                local text = (desc:IsA("TextButton") and desc.Text:lower()) or ""
-                if name == "equipbutton" or name == "equip" or text == "equip" or text:find("trang bị") then
-                    ClickButton(desc)
-                    task.wait(0.08)
+    local invData = nil
+    pcall(function()
+        invData = reloadRemote:InvokeServer()
+    end)
+    if type(invData) ~= "table" then return end
+
+    local playerLvl = GetPlayerLevel()
+    local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
+    local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
+    local isMage = (sp >= pp)
+
+    -- A. TỰ ĐỘNG TRANG BỊ VŨ KHÍ MẠNH NHẤT
+    if invData.weapons then
+        local bestWeaponNum = nil
+        local bestScore = -1
+        local bestIsEquipped = false
+        local bestName = ""
+
+        for key, item in pairs(invData.weapons) do
+            if type(item) == "table" and (tonumber(item.levelReq) or 1) <= playerLvl then
+                local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+                local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
+                local damage = isMage and (tonumber(item.spellPower) or 0) or (tonumber(item.physicalDamage) or 0)
+                local score = damage * 10 + rScore * 5 + (tonumber(item.currentUpgrade) or 0)
+
+                if score > bestScore then
+                    bestScore = score
+                    bestWeaponNum = num
+                    bestIsEquipped = (item.equipped == true)
+                    bestName = tostring(item.name or "Weapon")
+                end
+            end
+        end
+
+        local currentWeapon = LocalPlayer:FindFirstChild("weaponEquipped") and LocalPlayer.weaponEquipped.Value or ""
+        if bestWeaponNum and (not bestIsEquipped or currentWeapon ~= bestName) then
+            State.CurrentStatus = "Trang bị vũ khí tốt nhất: " .. bestName
+            pcall(function()
+                equipRemote:InvokeServer("weapon", bestWeaponNum)
+            end)
+            task.wait(0.2)
+        end
+    end
+
+    -- B. TỰ ĐỘNG TRANG BỊ NÓN (HELMET) MẠNH NHẤT
+    if invData.helmets then
+        local bestHelmetNum = nil
+        local bestScore = -1
+        local bestIsEquipped = false
+        local bestName = ""
+
+        for key, item in pairs(invData.helmets) do
+            if type(item) == "table" and (tonumber(item.levelReq) or 1) <= playerLvl then
+                local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+                local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
+                local statPower = isMage and (tonumber(item.spellPower) or 0) or (tonumber(item.physicalPower) or 0)
+                local score = (tonumber(item.health) or 0) * 2 + statPower * 5 + rScore * 5
+
+                if score > bestScore then
+                    bestScore = score
+                    bestHelmetNum = num
+                    bestIsEquipped = (item.equipped == true)
+                    bestName = tostring(item.name or "Helmet")
+                end
+            end
+        end
+
+        if bestHelmetNum and not bestIsEquipped then
+            pcall(function()
+                equipRemote:InvokeServer("helmet", bestHelmetNum)
+            end)
+            task.wait(0.2)
+        end
+    end
+
+    -- C. TỰ ĐỘNG TRANG BỊ GIÁP (CHEST) MẠNH NHẤT
+    if invData.chests then
+        local bestChestNum = nil
+        local bestScore = -1
+        local bestIsEquipped = false
+        local bestName = ""
+
+        for key, item in pairs(invData.chests) do
+            if type(item) == "table" and (tonumber(item.levelReq) or 1) <= playerLvl then
+                local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+                local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
+                local statPower = isMage and (tonumber(item.spellPower) or 0) or (tonumber(item.physicalPower) or 0)
+                local score = (tonumber(item.health) or 0) * 2 + statPower * 5 + rScore * 5
+
+                if score > bestScore then
+                    bestScore = score
+                    bestChestNum = num
+                    bestIsEquipped = (item.equipped == true)
+                    bestName = tostring(item.name or "Chest")
+                end
+            end
+        end
+
+        if bestChestNum and not bestIsEquipped then
+            pcall(function()
+                equipRemote:InvokeServer("chest", bestChestNum)
+            end)
+            task.wait(0.2)
+        end
+    end
+
+    -- D. TỰ ĐỘNG TRANG BỊ KỸ NĂNG (ABILITIES) VÀO Q, E, Q2, E2
+    if invData.abilities then
+        local sortedAbilities = {}
+        for key, item in pairs(invData.abilities) do
+            if type(item) == "table" and (tonumber(item.levelReq) or 1) <= playerLvl then
+                local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+                local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
+                local power = (tonumber(item.spellPower) or 0) + (tonumber(item.physicalDamage) or 0)
+                local isHeal = IsHealingTool and IsHealingTool(item)
+                table.insert(sortedAbilities, {
+                    num = num,
+                    name = item.name,
+                    score = (isHeal and 1000 or 0) + power * 5 + rScore * 10,
+                    equipped = item.equipped or {},
+                })
+            end
+        end
+        table.sort(sortedAbilities, function(a, b) return a.score > b.score end)
+
+        local slots = {"e", "q", "e2", "q2"}
+        for idx, slotName in ipairs(slots) do
+            local ab = sortedAbilities[idx]
+            if ab and ab.num then
+                local isAlreadyInSlot = false
+                if type(ab.equipped) == "table" then
+                    isAlreadyInSlot = (ab.equipped[slotName] == true)
+                end
+                if not isAlreadyInSlot then
+                    pcall(function()
+                        equipRemote:InvokeServer("ability", ab.num, slotName)
+                    end)
+                    task.wait(0.15)
+                end
+            end
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- 8. SMART AUTO SELL (BÁN ĐỒ RÁC 100% BẰNG GAME REMOTE, BẢO VỆ ĐỒ HIẾM)
+--------------------------------------------------------------------------------
+local lastSellCheck = 0
+local function ProcessAutoSell()
+    if not Config.AutoSell then return end
+    if not IsInLobby() then return end -- Chỉ bán đồ khi ở sảnh Lobby
+    if os.clock() - lastSellCheck < 5.0 then return end
+    lastSellCheck = os.clock()
+
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    local reloadRemote = remotes and remotes:FindFirstChild("reloadInvy")
+    local sellRemote = remotes and remotes:FindFirstChild("sellItemEvent")
+    if not reloadRemote or not sellRemote then return end
+
+    local invData = nil
+    pcall(function()
+        invData = reloadRemote:InvokeServer()
+    end)
+    if type(invData) ~= "table" then return end
+
+    local sellPayload = {
+        weapon = {},
+        helmet = {},
+        chest = {},
+        ability = {}
+    }
+    local totalToSell = 0
+
+    local function CheckAndQueueSell(category, itemsTable)
+        if not itemsTable then return end
+        for key, item in pairs(itemsTable) do
+            if type(item) == "table" then
+                local isEquipped = false
+                if type(item.equipped) == "table" then
+                    for _, eq in pairs(item.equipped) do
+                        if eq == true then isEquipped = true break end
+                    end
+                elseif item.equipped == true then
+                    isEquipped = true
+                end
+
+                local rarity = tostring(item.rarity or ""):lower()
+                local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
+
+                -- An toàn tuyệt đối: Không bán đồ đang đeo, chỉ bán nếu nằm trong danh sách SellRarities
+                local properRarity = rarity:gsub("^%l", string.upper)
+                if not isEquipped and num and Config.SellRarities[properRarity] == true then
+                    table.insert(sellPayload[category], num)
+                    totalToSell = totalToSell + 1
                 end
             end
         end
     end
 
-    -- Thử kích hoạt remote equipSet nếu game có hỗ trợ
-    if remotes and remotes:FindFirstChild("equipSet") then
-        pcall(function() remotes.equipSet:FireServer() end)
-    end
-end
+    CheckAndQueueSell("weapon", invData.weapons)
+    CheckAndQueueSell("helmet", invData.helmets)
+    CheckAndQueueSell("chest", invData.chests)
+    CheckAndQueueSell("ability", invData.abilities)
 
---------------------------------------------------------------------------------
--- 8. SMART AUTO SELL (BÁN ĐỒ RÁC, BẢO VỆ 100% ĐỒ HIẾM)
---------------------------------------------------------------------------------
-local function ProcessAutoSell()
-    if not Config.AutoSell then return end
-    
-    local inGame = LocalPlayer:FindFirstChild("inGame") and LocalPlayer.inGame.Value
-    local dungeonStarted = workspace:FindFirstChild("dungeonStarted") and workspace.dungeonStarted.Value
-    if inGame or dungeonStarted then return end -- Chỉ bán đồ khi ở sảnh Lobby
-
-    local remotes = ReplicatedStorage:FindFirstChild("remotes")
-    local sellRemote = remotes and remotes:FindFirstChild("sellItemEvent")
-    local invGui = PlayerGui:FindFirstChild("inventory")
-    if not invGui then return end
-
-    -- Quét qua các item trong túi
-    local scroll = invGui:FindFirstChild("ScrollingFrame", true) or invGui:FindFirstChild("itemScrollingFrame", true)
-    if scroll and sellRemote then
-        for _, item in pairs(scroll:GetChildren()) do
-            local rarityVal = item:FindFirstChild("rarity") and item.rarity.Value
-            local isEquipped = item:FindFirstChild("equipped") and item.equipped.Value == true
-
-            -- Quy tắc an toàn: Không bán đồ đang đeo, không bán Legendary/Mythical/Epic
-            if not isEquipped and rarityVal and Config.SellRarities[rarityVal] == true then
-                State.CurrentStatus = "Bán trang bị rác: " .. item.Name .. " (" .. rarityVal .. ")"
-                pcall(function()
-                    sellRemote:FireServer(item)
-                end)
-                State.SoldItemsCount = State.SoldItemsCount + 1
-                task.wait(0.15)
-            end
-        end
+    if totalToSell > 0 then
+        State.CurrentStatus = string.format("Bán %d món đồ rác qua remote...", totalToSell)
+        pcall(function()
+            sellRemote:FireServer(sellPayload)
+        end)
+        State.SoldItemsCount = State.SoldItemsCount + totalToSell
     end
 end
 
@@ -918,37 +1012,24 @@ local function ProcessSmartCombat()
 end
 
 --------------------------------------------------------------------------------
--- 11. AUTO START & READY IN DUNGEON
+-- 11. DUNGEON READY UP (TỰ ĐỘNG BẤM READY KHI VÀO TRẬN ĐẤU)
 --------------------------------------------------------------------------------
 local function ProcessDungeonReady()
-    if IsInLobby() then return end
+    if not IsInDungeon() then return end
 
-    local dungStarted = workspace:FindFirstChild("dungeonStarted") and workspace.dungeonStarted.Value
-    if dungStarted == true then return end -- Trận đấu đã bắt đầu, không cần ready nữa
-
-    -- 1. Kích hoạt Remote readyUp hoặc startDungeon nếu có
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
-    if remotes then
-        if remotes:FindFirstChild("readyUp") then
-            pcall(function() remotes.readyUp:FireServer() end)
-        end
-        if remotes:FindFirstChild("startDungeon") then
-            pcall(function() remotes.startDungeon:FireServer() end)
-        end
+    if remotes and remotes:FindFirstChild("readyUp") then
+        pcall(function() remotes.readyUp:FireServer() end)
+    end
+    if remotes and remotes:FindFirstChild("startDungeon") then
+        pcall(function() remotes.startDungeon:FireServer() end)
     end
 
-    -- 2. Tìm và bấm nút Ready / Start trên màn hình nếu có
-    for _, gui in pairs(PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "KaitunDashboard" then
-            for _, desc in pairs(gui:GetDescendants()) do
-                if desc:IsA("GuiButton") and desc.Visible then
-                    local name = desc.Name:lower()
-                    local text = (desc:IsA("TextButton") and desc.Text:lower()) or ""
-                    if name:find("ready") or name:find("start") or text:find("ready") or text:find("start") then
-                        ClickButton(desc)
-                    end
-                end
-            end
+    local readyGui = PlayerGui:FindFirstChild("readyGui") or PlayerGui:FindFirstChild("dungeonReady")
+    if readyGui and readyGui.Enabled then
+        local btn = readyGui:FindFirstChildWhichIsA("GuiButton", true)
+        if btn and btn.Visible then
+            ClickButton(btn)
         end
     end
 end
@@ -956,38 +1037,39 @@ end
 --------------------------------------------------------------------------------
 -- 12. AUTO REPLAY & REWARD CLAIM (CHỈ REPLAY KHI KẾT THÚC TRẬN ĐẤU)
 --------------------------------------------------------------------------------
+local hasReplayedThisDungeon = false
 local function ProcessAutoReplay()
     if not Config.AutoReplay then return end
 
     -- Tuyệt đối KHÔNG chạy AutoReplay khi đang ở Lobby!
-    if IsInLobby() then return end
-
-    -- Nút Replay trên màn hình khi kết thúc trận
-    -- (Trong Dungeon Quest, ReplayDungeonButton CHỈ BẬT khi trận đấu kết thúc)
-    local replayGui = PlayerGui:FindFirstChild("ReplayDungeonButton")
-    if replayGui and replayGui.Enabled then
-        local replayBtn = replayGui:FindFirstChild("Replay", true) or replayGui:FindFirstChildWhichIsA("GuiButton", true)
-        if replayBtn and replayBtn.Visible then
-            State.CurrentStatus = "Chiến thắng / Hết trận! Đang bấm Replay..."
-            QueueReconnect()
-            ClickButton(replayBtn)
-            State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-            task.wait(2)
-            return
-        end
+    if IsInLobby() then
+        hasReplayedThisDungeon = false
+        return
     end
 
-    -- Chỉ gọi Remote replayDungeon nếu game xác nhận hoàn thành (dungeonComplete)
+    if hasReplayedThisDungeon then return end
+
+    -- Chỉ kích hoạt khi trận đấu ĐÃ THẬT SỰ KẾT THÚC (dungeonComplete = true hoặc Replay Button xuất hiện)
     local dungeonComplete = workspace:FindFirstChild("dungeonComplete") and workspace.dungeonComplete.Value
-    if dungeonComplete == true then
+    local replayGui = PlayerGui:FindFirstChild("ReplayDungeonButton")
+    local replayBtn = replayGui and replayGui.Enabled and replayGui:FindFirstChild("Replay", true)
+
+    if dungeonComplete == true or (replayBtn and replayBtn.Visible) then
+        hasReplayedThisDungeon = true
+        State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
+        State.CurrentStatus = "Chiến thắng! Đang bấm Replay trận mới..."
+        QueueReconnect()
+
         local remotes = ReplicatedStorage:FindFirstChild("remotes")
         if remotes and remotes:FindFirstChild("replayDungeon") then
-            State.CurrentStatus = "Dungeon hoàn thành! Tự động Replay..."
-            QueueReconnect()
             pcall(function() remotes.replayDungeon:FireServer() end)
-            State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-            task.wait(2)
         end
+
+        if replayBtn and replayBtn.Visible then
+            ClickButton(replayBtn)
+        end
+
+        task.wait(2.5)
     end
 end
 
