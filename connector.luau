@@ -260,29 +260,36 @@ local BaseBridge = {}; do
     end
     
     function BaseBridge:IsAlive()
+        local reqFn = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request)
+        if not reqFn then
+            -- Fallback: If WebSocket is available, assume server might be alive
+            if WebSocketAvailable then return true end
+            return false
+        end
+
         local success, result = pcall(function()
             local response
             local thread = task.spawn(function()
-                local success, data = pcall(request, {
+                local ok, data = pcall(reqFn, {
                     Url = "http://" .. BridgeURL,
                     Method = "GET"
                 })
 
-                if success then
+                if ok and data then
                     response = data
                 end
             end)
 
             local start = os.clock()
-            repeat task.wait(0.05) until response ~= nil or os.clock() - start > 5
+            repeat task.wait(0.05) until response ~= nil or os.clock() - start > 4
 
             if response == nil then
                 task.cancel(thread)
                 return false
             end
     
-            -- 426 = Upgrade Required (WebSocket), 200 = HTTP mode
-            if response.StatusCode == 426 or response.StatusCode == 200 then
+            local code = response.StatusCode or response.statusCode or response.Status or response.status
+            if code and tonumber(code) then
                 return true
             end
     
@@ -290,7 +297,7 @@ local BaseBridge = {}; do
         end)
     
         if not success then
-            return false
+            return WebSocketAvailable == true
         end
     
         return result
