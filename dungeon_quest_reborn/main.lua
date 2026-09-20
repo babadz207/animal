@@ -32,6 +32,27 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 
 --------------------------------------------------------------------------------
+-- SESSION MANAGER (TỰ ĐỘNG DỪNG CÁC PHIÊN CŨ ĐANG CHẠY NGẦM)
+--------------------------------------------------------------------------------
+if getgenv and getgenv()._DQKaitunSession then
+    getgenv()._DQKaitunSession = nil -- Ra tín hiệu dừng mọi vòng lặp cũ
+    task.wait(0.4)
+end
+
+local CurrentSession = tick()
+if getgenv then
+    getgenv()._DQKaitunSession = CurrentSession
+end
+
+-- Xóa sạch giao diện cũ nếu có trên màn hình
+pcall(function()
+    local oldGui = PlayerGui:FindFirstChild("KaitunDashboard")
+    if oldGui then oldGui:Destroy() end
+    local coreGui = game:GetService("CoreGui"):FindFirstChild("KaitunDashboard")
+    if coreGui then coreGui:Destroy() end
+end)
+
+--------------------------------------------------------------------------------
 -- 0. AUTO-EXECUTE & PERSISTENCE ACROSS ALL MAPS / PLACE IDS
 --------------------------------------------------------------------------------
 local qot = queue_on_teleport or queueonteleport 
@@ -976,6 +997,7 @@ local function CreateDashboard()
     -- Update loop UI
     task.spawn(function()
         while task.wait(0.3) do
+            if getgenv and getgenv()._DQKaitunSession ~= CurrentSession then break end
             if not frame or not frame.Parent then break end
             local playerLvl = GetPlayerLevel()
             local inDung = IsInDungeon()
@@ -1004,6 +1026,10 @@ local function Main()
 
     task.spawn(function()
         while task.wait(0.35) do
+            if getgenv and getgenv()._DQKaitunSession ~= CurrentSession then
+                print("[DungeonQuest] Dừng luồng cũ nhường chỗ cho luồng mới.")
+                break
+            end
             pcall(ProcessAutoEnter)
             pcall(ProcessAutoStats)
             pcall(ProcessAutoEquip)
