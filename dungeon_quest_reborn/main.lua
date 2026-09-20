@@ -713,71 +713,79 @@ local function ProcessAutoEquip()
             end
         end
 
-        -- 3. LỌC TRÙNG KỸ NĂNG: Chỉ giữ lại 1 cuốn MẠNH NHẤT cho mỗi tên chiêu thức!
-        local bestByBaseName = {}
-        for _, ab in ipairs(rawAbilities) do
-            local bName = ab.baseName
-            if not bestByBaseName[bName] or ab.score > bestByBaseName[bName].score then
-                bestByBaseName[bName] = ab
-            end
-        end
+        -- Sắp xếp tất cả các kỹ năng theo điểm số giảm dần
+        table.sort(rawAbilities, function(a, b) return a.score > b.score end)
 
-        local uniqueAbilities = {}
-        for _, ab in pairs(bestByBaseName) do
-            table.insert(uniqueAbilities, ab)
-        end
-        table.sort(uniqueAbilities, function(a, b) return a.score > b.score end)
-
-        -- 4. PHÂN TÁCH VAI TRÒ: SÁT THƯƠNG & HỒI MÁU
-        local healSkill = nil
-        local damageSkills = {}
-        for _, ab in ipairs(uniqueAbilities) do
-            if ab.isHeal and not healSkill then
-                healSkill = ab
-            else
-                table.insert(damageSkills, ab)
-            end
-        end
-
-        -- 5. THIẾT LẬP COMBO THÔNG MINH CHO CẢ 2 BỘ (SET 1: Q, E | SET 2: Q2, E2)
-        -- Tuyệt đối KHÔNG BAO GIỜ trang bị 2 chiêu trùng nhau vào Q và E của cùng một bộ!
+        -- 3. CHỌN KỸ NĂNG VÀO TỪNG SLOT THEO NGUYÊN TẮC:
+        -- - Mỗi item (uniqueItemNum) chỉ được gán vào ĐÚNG 1 slot duy nhất!
+        -- - Trong cùng một bộ (Set 1: Q & E hoặc Set 2: Q2 & E2), 2 chiêu TUYỆT ĐỐI KHÔNG TRÙNG baseName!
+        local usedItemNums = {}
         local targetSlots = {}
 
-        if #damageSkills >= 1 then
-            targetSlots["q"] = damageSkills[1] -- Chiêu sát thương chủ lực (Ví dụ: Whirlwind)
-        elseif healSkill then
-            targetSlots["q"] = healSkill
+        -- Set 1: Slot Q (Chiêu chủ lực tốt nhất)
+        for _, ab in ipairs(rawAbilities) do
+            if not usedItemNums[ab.num] then
+                targetSlots["q"] = ab
+                usedItemNums[ab.num] = true
+                break
+            end
         end
 
-        if healSkill then
-            -- Nếu có chiêu hồi máu: Gán vào slot E của Set 1 (Combo: 1 Sát thương + 1 Hồi máu)
-            targetSlots["e"] = healSkill
-        elseif #damageSkills >= 2 then
-            -- Nếu không có hồi máu: Gán chiêu sát thương thứ 2 KHÁC NHAU vào E (Combo 2 chiêu độc lập)
-            targetSlots["e"] = damageSkills[2]
+        -- Set 1: Slot E (Chiêu thứ 2 KHÁC LOẠI với Q)
+        for _, ab in ipairs(rawAbilities) do
+            if not usedItemNums[ab.num] then
+                local conflictWithQ = targetSlots["q"] and (ab.baseName == targetSlots["q"].baseName)
+                if not conflictWithQ then
+                    targetSlots["e"] = ab
+                    usedItemNums[ab.num] = true
+                    break
+                end
+            end
         end
 
-        -- Thiết lập Set 2 (Dự phòng / Kỹ năng thay thế)
-        if #damageSkills >= 3 then
-            targetSlots["q2"] = damageSkills[3]
-        elseif #damageSkills >= 2 and targetSlots["e"] == healSkill then
-            targetSlots["q2"] = damageSkills[2]
-        elseif damageSkills[1] then
-            targetSlots["q2"] = damageSkills[1]
+        -- Set 2: Slot Q2
+        for _, ab in ipairs(rawAbilities) do
+            if not usedItemNums[ab.num] then
+                targetSlots["q2"] = ab
+                usedItemNums[ab.num] = true
+                break
+            end
         end
 
-        if #damageSkills >= 4 then
-            targetSlots["e2"] = damageSkills[4]
-        elseif healSkill and targetSlots["e"] ~= healSkill then
-            targetSlots["e2"] = healSkill
-        elseif #damageSkills >= 2 and targetSlots["q2"] ~= damageSkills[2] then
-            targetSlots["e2"] = damageSkills[2]
-        elseif damageSkills[1] and targetSlots["q2"] ~= damageSkills[1] then
-            targetSlots["e2"] = damageSkills[1]
+        -- Set 2: Slot E2 (Chiêu thứ 2 của Set 2 KHÁC LOẠI với Q2)
+        for _, ab in ipairs(rawAbilities) do
+            if not usedItemNums[ab.num] then
+                local conflictWithQ2 = targetSlots["q2"] and (ab.baseName == targetSlots["q2"].baseName)
+                if not conflictWithQ2 then
+                    targetSlots["e2"] = ab
+                    usedItemNums[ab.num] = true
+                    break
+                end
+            end
         end
 
-        -- 6. GỬI REMOTE TRANG BỊ CHÍNH XÁC VÀO TỪNG SLOT
+        -- 4. ĐỒNG BỘ TRANG BỊ VỚI GAME SERVER
         local unequipRemote = remotes and remotes:FindFirstChild("unequipItem")
+        local equipRemote = remotes and remotes:FindFirstChild("equipItem")
+
+        -- Bước A: Gỡ bỏ bất kỳ item nào đang ở SAI slot hoặc không còn được dùng
+        for _, ab in ipairs(rawAbilities) do
+            if type(ab.equipped) == "table" then
+                for s, isEq in pairs(ab.equipped) do
+                    if isEq == true then
+                        local assignedAb = targetSlots[s]
+                        if not assignedAb or assignedAb.num ~= ab.num then
+                            if unequipRemote then
+                                pcall(function() unequipRemote:InvokeServer("ability", ab.num) end)
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Bước B: Gán từng item vào đúng slot đã định
         for slotName, ab in pairs(targetSlots) do
             if ab and ab.num then
                 local isAlreadyInSlot = false
@@ -785,16 +793,7 @@ local function ProcessAutoEquip()
                     isAlreadyInSlot = (ab.equipped[slotName] == true)
                 end
 
-                if not isAlreadyInSlot then
-                    if unequipRemote and type(ab.equipped) == "table" then
-                        for s, isEq in pairs(ab.equipped) do
-                            if isEq == true and s ~= slotName then
-                                pcall(function() unequipRemote:InvokeServer("ability", ab.num) end)
-                                task.wait(0.1)
-                                break
-                            end
-                        end
-                    end
+                if not isAlreadyInSlot and equipRemote then
                     pcall(function()
                         equipRemote:InvokeServer("ability", ab.num, slotName)
                     end)
