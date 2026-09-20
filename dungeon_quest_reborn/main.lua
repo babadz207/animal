@@ -109,12 +109,14 @@ local Config = {
     HardcoreMode = false,         -- Bật nếu muốn cày thêm 20% may mắn & exp
     PrivateLobby = true,          -- Tạo phòng riêng tư không bị quấy rối
     
-    -- Combat & Evade
+    -- Combat & Movement (Đi bộ tiếp cận, Đánh thường, Xả skill & Đi lùi thông minh)
     KillAura = true,              -- Tự động đánh quái & Boss
-    SafeHoverHeight = 13,         -- Độ cao bay an toàn trên không (tránh 100% đòn quét mặt đất)
-    BossEvadeDistance = 22,       -- Khoảng cách lướt an toàn khi Boss tung chiêu diện rộng
-    AutoSpamSkills = true,        -- Tự xả chiêu thức thông minh (AoE khi đông, dồn dame Boss)
-    LowHealthRetreat = true,      -- Tự động bay cao hơn khi máu < 30% để hồi máu
+    CombatRangeMage = 15,         -- Cự ly đứng bắn của Pháp sư
+    CombatRangeWarrior = 6,       -- Cự ly áp sát của Chiến binh
+    KiteDistanceMage = 10,        -- Cự ly bắt đầu lùi của Pháp sư
+    KiteDistanceWarrior = 4,      -- Cự ly bắt đầu lùi của Chiến binh
+    AutoSpamSkills = true,        -- Tự xả chiêu thức thông minh (Q/E, Backpack, Swap set)
+    BossEvadeDistance = 20,       -- Khoảng cách né an toàn khi Boss tung vòng đỏ
     
     -- Stats & Progression
     AutoStats = true,             -- Tự nâng điểm thuộc tính khi lên cấp
@@ -360,9 +362,36 @@ local RARITY_SCORE = {
     ["ultimate"] = 7,
 }
 
-local function AttackWithWeapon(targetPos)
+local lastAttackTime = 0
+local function EnsureWeaponEquipped()
     local char = LocalPlayer.Character
-    local tool = char and char:FindFirstChildOfClass("Tool")
+    if not char then return nil end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if tool and not tool:FindFirstChild("localEvent") then
+        return tool
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, item in ipairs(bp:GetChildren()) do
+            if item:IsA("Tool") and not item:FindFirstChild("localEvent") then
+                local hum = GetHumanoid()
+                if hum then
+                    hum:EquipTool(item)
+                    return item
+                end
+            end
+        end
+    end
+    return tool
+end
+
+local function AttackWithWeapon(targetPos)
+    local now = os.clock()
+    if now - lastAttackTime < 0.16 then return end
+    lastAttackTime = now
+
+    local tool = EnsureWeaponEquipped()
     if tool then
         pcall(function() tool:Activate() end)
     end
@@ -802,17 +831,24 @@ local function SwapAbilitySet()
     return false
 end
 
+local function IsOnCooldown(btnContainer)
+    if not btnContainer then return false end
+    local cd = btnContainer:FindFirstChild("cooldownNumber", true)
+    if cd and cd.Visible and cd.Text ~= "" then
+        local num = tonumber(cd.Text:match("[%d%.]+"))
+        if num and num > 0.1 then return true end
+    end
+    return false
+end
+
 local function AreCurrentSkillsOnCooldown()
     local abilitiesGui = PlayerGui:FindFirstChild("abilities")
     if not abilitiesGui then return false end
 
-    local leftCd = abilitiesGui:FindFirstChild("LeftAbility", true) and abilitiesGui.LeftAbility:FindFirstChild("cooldownNumber", true)
-    local rightCd = abilitiesGui:FindFirstChild("RightAbility", true) and abilitiesGui.RightAbility:FindFirstChild("cooldownNumber", true)
+    local leftBtn = abilitiesGui:FindFirstChild("LeftAbility", true)
+    local rightBtn = abilitiesGui:FindFirstChild("RightAbility", true)
 
-    local leftInCd = leftCd and leftCd.Text ~= "" and tonumber(leftCd.Text) and tonumber(leftCd.Text) > 0
-    local rightInCd = rightCd and rightCd.Text ~= "" and tonumber(rightCd.Text) and tonumber(rightCd.Text) > 0
-
-    return (leftInCd and rightInCd)
+    return IsOnCooldown(leftBtn) and IsOnCooldown(rightBtn)
 end
 
 -- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast)
@@ -826,7 +862,42 @@ local function HasLineOfSight(fromPos, toPos, ignoreList)
     return result == nil
 end
 
--- Tính đường đi 3D NavMesh luồn lách qua hành lang khi bị tường che khuất
+-- Kiểm tra vật cản (tường, cột) theo một hướng để né khi đi lùi
+local function CheckDirectionClear(fromPos, dir, distance)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local ignore = {LocalPlayer.Character}
+    local ef = workspace:FindFirstChild("enemyFolder") or (workspace:FindFirstChild("dungeon") and workspace.dungeon:FindFirstChild("enemyFolder", true))
+    if ef then table.insert(ignore, ef) end
+    rayParams.FilterDescendantsInstances = ignore
+
+    local result = workspace:Raycast(fromPos, dir * distance, rayParams)
+    local hitDist = result and result.Distance or distance
+    return (result == nil), hitDist
+end
+
+-- Tìm vòng đỏ / telegraph đòn đánh của Boss trong khu vực
+local function FindNearbyBossHazard(rootPos, maxDist)
+    local dung = workspace:FindFirstChild("dungeon")
+    if not dung then return nil end
+
+    for _, desc in ipairs(dung:GetDescendants()) do
+        if desc:IsA("BasePart") and IsDangerousAoE(desc, rootPos) then
+            local dist = (desc.Position - rootPos).Magnitude
+            if dist < maxDist then
+                return desc
+            end
+        end
+    end
+    return nil
+end
+
+-- Tính đường đi 3D NavMesh luồn lách qua hành lang khi bị tường che khuất (có caching chống giật lag)
+local cachedPathWaypoints = nil
+local cachedPathTarget = nil
+local lastPathTime = 0
+local currentWaypointIndex = 1
+
 local function GetDungeonWaypoints(startPos, endPos)
     local path = PathfindingService:CreatePath({
         AgentRadius = 2.5,
@@ -843,6 +914,46 @@ local function GetDungeonWaypoints(startPos, endPos)
         return path:GetWaypoints()
     end
     return nil
+end
+
+local function FollowWaypoints(targetPos)
+    local root = GetRootPart()
+    local hum = GetHumanoid()
+    if not root or not hum then return end
+
+    local now = os.clock()
+    local needCompute = (not cachedPathWaypoints)
+        or (now - lastPathTime > 1.2)
+        or (cachedPathTarget and (targetPos - cachedPathTarget).Magnitude > 12)
+        or (currentWaypointIndex > #cachedPathWaypoints)
+
+    if needCompute then
+        lastPathTime = now
+        cachedPathTarget = targetPos
+        cachedPathWaypoints = GetDungeonWaypoints(root.Position, targetPos)
+        currentWaypointIndex = 2
+    end
+
+    if cachedPathWaypoints and #cachedPathWaypoints >= currentWaypointIndex then
+        local wp = cachedPathWaypoints[currentWaypointIndex]
+        if wp then
+            local wpDist = (Vector3.new(wp.Position.X, root.Position.Y, wp.Position.Z) - root.Position).Magnitude
+            if wpDist < 3.5 then
+                currentWaypointIndex = currentWaypointIndex + 1
+                if cachedPathWaypoints[currentWaypointIndex] then
+                    wp = cachedPathWaypoints[currentWaypointIndex]
+                end
+            end
+            if wp then
+                if wp.Action == Enum.PathWaypointAction.Jump then
+                    hum.Jump = true
+                end
+                hum:MoveTo(wp.Position)
+            end
+        end
+    else
+        hum:MoveTo(targetPos)
+    end
 end
 
 local function GetAllDungeonEnemies()
@@ -883,8 +994,12 @@ local function GetAllDungeonEnemies()
     return mobs
 end
 
+local lastAbilityCastTime = 0
 local function CastAllAbilities(isBoss, mobCount, healthPercent)
     if not Config.AutoSpamSkills then return end
+    local now = os.clock()
+    if now - lastAbilityCastTime < 0.2 then return end
+    lastAbilityCastTime = now
 
     -- 1. Kích hoạt chiêu thức trực tiếp trong Backpack (Bao gồm Fireball, Spell, v.v.)
     local bp = LocalPlayer:FindFirstChild("Backpack")
@@ -925,20 +1040,42 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent)
     end
 end
 
+-- Chống kẹt địa hình khi đi bộ
+local lastPlayerPos = nil
+local lastPlayerMoveTime = 0
+local strafeSign = 1
+local lastStrafeSwitch = 0
+
 local function ProcessSmartCombat()
     if not Config.KillAura then return end
     if IsInLobby() then return end
 
-    local allMobs = GetAllDungeonEnemies()
     local root = GetRootPart()
     local hum = GetHumanoid()
     local char = LocalPlayer.Character
+    if not root or not hum or hum.Health <= 0 then return end
 
-    if #allMobs == 0 or not root or not hum or hum.Health <= 0 then return end
+    local allMobs = GetAllDungeonEnemies()
+    if #allMobs == 0 then
+        hum.AutoRotate = true
+        return
+    end
 
     local healthPercent = hum.Health / hum.MaxHealth
 
-    -- 1. Tìm quái vật mục tiêu ưu tiên (quái gần nhất còn sống)
+    -- 1. ƯU TIÊN NÉ CHIÊU DIỆN RỘNG (TELEGRAPH RED ZONE) CỦA BOSS
+    local bossHazard = FindNearbyBossHazard(root.Position, Config.BossEvadeDistance or 20)
+    if bossHazard then
+        local hazardDiff = root.Position - bossHazard.Position
+        local escapeDir = Vector3.new(hazardDiff.X, 0, hazardDiff.Z)
+        local escapeUnit = (escapeDir.Magnitude > 0.1) and escapeDir.Unit or Vector3.new(1, 0, 0)
+        State.CurrentStatus = "⚡ Đang lướt né vòng đỏ (Telegraph) của Boss!"
+        hum.AutoRotate = true
+        hum:Move(escapeUnit, false)
+        return
+    end
+
+    -- 2. TÌM QUÁI VẬT MỤC TIÊU ƯU TIÊN (Quái gần nhất còn sống)
     local targetMob = nil
     local shortestDist = math.huge
     local livingMobs = #allMobs
@@ -958,66 +1095,117 @@ local function ProcessSmartCombat()
 
     State.EnemiesRemaining = livingMobs
 
-    if targetMob then
-        local mobRoot = targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")
-        local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
-        if mobRoot and mobHum and mobHum.Health > 0 then
-            local diff = root.Position - mobRoot.Position
-            local dist = diff.Magnitude
-            local enemyHp = math.floor(mobHum.Health)
-            local enemyMaxHp = math.floor(mobHum.MaxHealth)
-            isBossTarget = (mobHum.MaxHealth > 10000) or (targetMob.Name:lower():find("boss") ~= nil)
+    if not targetMob then
+        hum.AutoRotate = true
+        return
+    end
 
-            -- Xác định lớp nhân vật để tính cự ly kiting tối ưu
-            local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
-            local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
-            local isMage = (sp >= pp)
+    local mobRoot = targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")
+    local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
+    if not mobRoot or not mobHum or mobHum.Health <= 0 then
+        hum.AutoRotate = true
+        return
+    end
 
-            local idealRange = isMage and (Config.CombatRangeMage or 14) or (Config.CombatRangeWarrior or 6)
-            local minKiteDist = isMage and 10 or 4
+    local diff = root.Position - mobRoot.Position
+    local dist = diff.Magnitude
+    local enemyHp = math.floor(mobHum.Health)
+    local enemyMaxHp = math.floor(mobHum.MaxHealth)
+    isBossTarget = (mobHum.MaxHealth > 10000) or (targetMob.Name:lower():find("boss") ~= nil)
 
-            -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
-            local horizontalDiff = Vector3.new(diff.X, 0, diff.Z)
-            local awayDir = (horizontalDiff.Magnitude > 0.1) and horizontalDiff.Unit or Vector3.new(0, 0, 1)
+    -- Xác định lớp nhân vật để tính cự ly tối ưu
+    local sp = LocalPlayer:FindFirstChild("spellPower") and LocalPlayer.spellPower.Value or 0
+    local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
+    local isMage = (sp >= pp)
 
-            -- Luôn xoay nhân vật nhìn thẳng vào quái vật để vung đòn & bắn chiêu chuẩn xác
-            local lookAtPos = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
-            pcall(function()
-                root.CFrame = CFrame.lookAt(root.Position, lookAtPos)
-            end)
+    local idealRange = isMage and (Config.CombatRangeMage or 15) or (Config.CombatRangeWarrior or 6)
+    local minKiteDist = isMage and (Config.KiteDistanceMage or 10) or (Config.KiteDistanceWarrior or 4)
 
-            -- 2. DI CHUYỂN & KITING ĐI LÙI THÔNG MINH
-            if dist > idealRange + 3 then
-                -- A. Khi ở xa: Đi bộ tiến tới gần quái qua đường đi thông minh (NavMesh Pathfinding)
-                State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
-                local waypoints = GetDungeonWaypoints(root.Position, mobRoot.Position)
-                if waypoints and #waypoints > 1 then
-                    hum:MoveTo(waypoints[2].Position)
-                else
-                    hum:MoveTo(mobRoot.Position)
-                end
-            elseif dist < minKiteDist then
-                -- B. Khi quái áp sát quá gần: ĐI LÙI THẬT THÔNG MINH (Kiting Backward + Strafe né góc)
-                local strafeOffset = Vector3.new(-awayDir.Z, 0, awayDir.X) * 2
-                local kitePos = root.Position + awayDir * 7 + strafeOffset
-                State.CurrentStatus = string.format("🔄 Đi lùi thông minh (Kite) vừa xả đòn: %s", targetMob.Name)
-                hum:MoveTo(kitePos)
-            else
-                -- C. Cự ly vàng (Sweet spot): Giữ khoảng cách và đảo bước chân nhẹ
-                local strafeOffset = Vector3.new(-awayDir.Z, 0, awayDir.X) * 3
-                State.CurrentStatus = string.format("⚔️ Giữ cự ly & xả đòn: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
-                hum:MoveTo(root.Position + strafeOffset)
-            end
+    -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
+    local horizontalDiff = Vector3.new(diff.X, 0, diff.Z)
+    local awayDir = (horizontalDiff.Magnitude > 0.1) and horizontalDiff.Unit or Vector3.new(0, 0, 1)
+    local leftDir = Vector3.new(-awayDir.Z, 0, awayDir.X).Unit
+    local rightDir = -leftDir
 
-            -- 3. ĐÁNH THƯỜNG VỚI VŨ KHÍ (KHI TRONG TẦM TẤN CÔNG)
-            if dist <= (idealRange + 8) then
-                AttackWithWeapon(mobRoot.Position)
-            end
+    -- Đảo hướng strafe mỗi 2.5 giây để di chuyển tự nhiên và linh hoạt
+    local now = os.clock()
+    if now - lastStrafeSwitch > 2.5 then
+        strafeSign = -strafeSign
+        lastStrafeSwitch = now
+    end
 
-            -- 4. XẢ SKILL THÔNG MINH (Fireball, chiêu thức trong túi đồ & phím Q/E)
-            CastAllAbilities(isBossTarget, livingMobs, healthPercent)
+    -- Luôn xoay nhân vật nhìn thẳng vào quái vật để đòn đánh & kỹ năng trúng 100%
+    local lookAtPos = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
+    pcall(function()
+        root.CFrame = CFrame.lookAt(root.Position, lookAtPos)
+    end)
+
+    -- Kiểm tra chống kẹt địa hình
+    if not lastPlayerPos then
+        lastPlayerPos = root.Position
+        lastPlayerMoveTime = now
+    else
+        local moved = (root.Position - lastPlayerPos).Magnitude
+        if moved > 1.2 then
+            lastPlayerPos = root.Position
+            lastPlayerMoveTime = now
+        elseif now - lastPlayerMoveTime > 1.2 then
+            hum.Jump = true
+            cachedPathWaypoints = nil
+            lastPlayerMoveTime = now
         end
     end
+
+    -- 3. DI CHUYỂN, TIẾP CẬN & ĐI LÙI THÔNG MINH
+    if dist > (idealRange + 3) then
+        -- A. Ở XA: Đi bộ tiến tới gần quái
+        State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
+        hum.AutoRotate = true
+
+        local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
+        if hasLOS then
+            hum:MoveTo(mobRoot.Position)
+        else
+            FollowWaypoints(mobRoot.Position)
+        end
+    elseif dist < minKiteDist then
+        -- B. QUÁ GẦN: ĐI LÙI THẬT THÔNG MINH (Kiting Backward + Né tường + Circle Strafe)
+        -- Tắt AutoRotate để nhân vật giữ nguyên hướng mặt nhìn quái và lùi bằng chân
+        hum.AutoRotate = false
+
+        local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 6)
+        local chosenMoveDir = nil
+
+        if backClear or backDist > 3.5 then
+            -- Phía sau thông thoáng: Đi lùi kết hợp strafe nhẹ tạo góc xả chiêu đẹp
+            local strafePart = (strafeSign > 0) and leftDir or rightDir
+            chosenMoveDir = (awayDir * 0.8 + strafePart * 0.35).Unit
+            State.CurrentStatus = string.format("🔄 Đi lùi thông minh (Kite) vừa xả đòn: %s", targetMob.Name)
+        else
+            -- Phía sau vướng tường/cột: Circle-Strafe né sang bên thoáng nhất
+            local leftClear, leftDist = CheckDirectionClear(root.Position, leftDir, 5)
+            local rightClear, rightDist = CheckDirectionClear(root.Position, rightDir, 5)
+            chosenMoveDir = (leftDist >= rightDist) and leftDir or rightDir
+            State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe): %s", targetMob.Name)
+        end
+
+        hum:Move(chosenMoveDir, false)
+    else
+        -- C. CỰ LY VÀNG (Sweet Spot): Giữ khoảng cách hoàn hảo & đảo bước chân nhẹ
+        hum.AutoRotate = false
+        local strafeDir = (strafeSign > 0) and leftDir or rightDir
+        State.CurrentStatus = string.format("⚔️ Giữ cự ly vàng & xả đòn: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
+        hum:Move(strafeDir * 0.45, false)
+    end
+
+    -- 4. ĐÁNH THƯỜNG VỚI VŨ KHÍ (Khi trong tầm đánh)
+    local attackMaxDist = isMage and (idealRange + 8) or 8
+    if dist <= attackMaxDist then
+        AttackWithWeapon(mobRoot.Position)
+    end
+
+    -- 5. XẢ SKILL THÔNG MINH (Chiêu Q, E, Túi đồ Backpack & Đổi bộ kỹ năng 2)
+    CastAllAbilities(isBossTarget, livingMobs, healthPercent)
 end
 
 --------------------------------------------------------------------------------
@@ -1215,10 +1403,22 @@ end
 local function Main()
     CreateDashboard()
 
+    -- Luồng 1: Combat, Di chuyển & Đi lùi Kiting thời gian thực (Cực kỳ mượt mà, phản hồi cao ~16 FPS)
     task.spawn(function()
-        while task.wait(0.35) do
+        while task.wait(0.06) do
             if getgenv and getgenv()._DQKaitunSession ~= CurrentSession then
-                print("[DungeonQuest] Dừng luồng cũ nhường chỗ cho luồng mới.")
+                print("[DungeonQuest] Dừng luồng combat cũ.")
+                break
+            end
+            pcall(ProcessSmartCombat)
+        end
+    end)
+
+    -- Luồng 2: Quản lý Game State, Lobby, Trang bị, Bán đồ, Nâng điểm, Replay (Chu kỳ 0.5s)
+    task.spawn(function()
+        while task.wait(0.5) do
+            if getgenv and getgenv()._DQKaitunSession ~= CurrentSession then
+                print("[DungeonQuest] Dừng luồng quản lý cũ.")
                 break
             end
             pcall(ProcessAutoEnter)
@@ -1227,7 +1427,6 @@ local function Main()
             pcall(ProcessAutoSell)
             pcall(ProcessLobbyProgression)
             pcall(ProcessDungeonReady)
-            pcall(ProcessSmartCombat)
             pcall(ProcessAutoReplay)
         end
     end)
