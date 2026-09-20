@@ -476,17 +476,51 @@ local function IsDangerousAoE(part, rootPos)
     return false
 end
 
-local function CastAllAbilities(isBoss, mobCount)
+-- Nhận diện kỹ năng Hồi Máu
+local HEAL_KEYWORDS = {"heal", "rejuvenat", "aura of life", "redemption", "inner sanctum", "splash"}
+local function IsHealingTool(tool)
+    if not tool then return false end
+    local name = tool.Name:lower()
+    for _, kw in ipairs(HEAL_KEYWORDS) do
+        if name:find(kw) then return true end
+    end
+    return false
+end
+
+-- Nhận diện quái đánh xa (Ranged / Archer / Mage)
+local function IsRangedEnemy(mob)
+    if not mob then return false end
+    local name = mob.Name:lower()
+    return name:find("archer") or name:find("mage") or name:find("wizard") or name:find("ranged") or name:find("caster") or name:find("skeleton") or name:find("shooter")
+end
+
+local function CastAllAbilities(isBoss, mobCount, healthPercent)
     if not Config.AutoSpamSkills then return end
 
     local char = LocalPlayer.Character
     if not char then return end
 
-    -- Ưu tiên chiêu thức theo tình huống:
-    -- Nếu đông quái (mobCount >= 2): xả AoE (Whirlwind, Poison, Cloud)
-    -- Nếu đánh Boss: dồn toàn bộ sát thương (Fireball, Beam, Single-target)
+    -- 1. ƯU TIÊN SỐ 1: NẾU MÁU < 75% VÀ CÓ CHIÊU HỒI MÁU THÌ PHẢI XẢ NGAY LẬP TỨC
+    if healthPercent < 0.75 then
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") and IsHealingTool(tool) then
+                local shootEvent = tool:FindFirstChild("fireballShootEvent") or tool:FindFirstChild("spellEvent") or tool:FindFirstChild("abilityEvent")
+                if shootEvent and shootEvent:IsA("RemoteEvent") then
+                    pcall(function() shootEvent:FireServer() end)
+                end
+                local localEvt = tool:FindFirstChild("localEvent")
+                if localEvt and localEvt:IsA("BindableEvent") then
+                    pcall(function() localEvt:Fire() end)
+                end
+            end
+        end
+    end
+
+    -- 2. XẢ CÁC CHIÊU TẤN CÔNG:
+    -- Nếu đông quái (mobCount >= 2): xả AoE diện rộng
+    -- Nếu đánh Boss / Quái đơn: dồn toàn bộ sát thương đơn mục tiêu
     for _, tool in pairs(char:GetChildren()) do
-        if tool:IsA("Tool") then
+        if tool:IsA("Tool") and not IsHealingTool(tool) then
             local shootEvent = tool:FindFirstChild("fireballShootEvent") or tool:FindFirstChild("spellEvent") or tool:FindFirstChild("abilityEvent")
             if shootEvent and shootEvent:IsA("RemoteEvent") then
                 pcall(function() shootEvent:FireServer() end)
@@ -519,6 +553,8 @@ local function ProcessSmartCombat()
     local hum = GetHumanoid()
     if not root or not hum or hum.Health <= 0 then return end
 
+    local healthPercent = hum.Health / hum.MaxHealth
+
     -- Kiểm tra né chiêu Boss
     local inDanger = false
     for _, obj in pairs(workspace:GetChildren()) do
@@ -528,51 +564,70 @@ local function ProcessSmartCombat()
         end
     end
 
-    -- Tìm mục tiêu thông minh (Ưu tiên Boss > Quái gần nhất)
+    -- THỨ TỰ ƯU TIÊN MỤC TIÊU THÔNG MINH (TARGET PRIORITIZATION):
+    -- Vì ta bay trên không (13 studs), quái cận chiến hoàn toàn KHÔNG THỂ đánh trúng bạn.
+    -- Mối đe dọa duy nhất là: Quái Bắn Xa (Archer/Mage) và Boss!
+    -- 👉 Ưu tiên: Quái Bắn Xa > Boss > Quái Cận Chiến
     local targetMob = nil
     local shortestDist = math.huge
     local livingMobs = 0
     local isBossTarget = false
+    local isRangedTarget = false
+
+    local rangedList = {}
+    local bossList = {}
+    local meleeList = {}
 
     for _, mob in pairs(enemiesFolder:GetChildren()) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         if mobRoot and mobHum and mobHum.Health > 0 then
             livingMobs = livingMobs + 1
-            local isBoss = mob.Name:lower():find("boss") or (mobHum.MaxHealth > 10000)
-            local dist = (mobRoot.Position - root.Position).Magnitude
-
-            if isBoss then
-                targetMob = mob
-                isBossTarget = true
-                shortestDist = dist
-                break
-            elseif dist < shortestDist then
-                shortestDist = dist
-                targetMob = mob
+            if IsRangedEnemy(mob) then
+                table.insert(rangedList, mob)
+            elseif mob.Name:lower():find("boss") or (mobHum.MaxHealth > 10000) then
+                table.insert(bossList, mob)
+            else
+                table.insert(meleeList, mob)
             end
         end
     end
 
     State.EnemiesRemaining = livingMobs
 
+    -- Chọn mục tiêu theo ưu tiên
+    local selectedCategory = (#rangedList > 0 and rangedList) or (#bossList > 0 and bossList) or meleeList
+    if selectedCategory == rangedList then isRangedTarget = true end
+    if selectedCategory == bossList then isBossTarget = true end
+
+    for _, mob in pairs(selectedCategory) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
+        if mobRoot then
+            local dist = (mobRoot.Position - root.Position).Magnitude
+            if dist < shortestDist then
+                shortestDist = dist
+                targetMob = mob
+            end
+        end
+    end
+
     if targetMob then
         local mobRoot = targetMob:FindFirstChild("HumanoidRootPart") or targetMob:FindFirstChild("Torso")
         if mobRoot then
-            -- Tính toán vị trí an toàn tuyệt đối
             local targetHeight = Config.SafeHoverHeight
 
-            -- Nếu máu thấp (< 30%), tự động bay lên cao hơn để hồi phục
-            if Config.LowHealthRetreat and (hum.Health / hum.MaxHealth) < 0.35 then
-                targetHeight = Config.SafeHoverHeight + 12
-                State.CurrentStatus = "⚡ Máu yếu! Đang bay cao hồi phục..."
-            elseif inDanger then
-                -- Boss đang vận chiêu diện rộng: lướt mượt bằng vận tốc ra ngoài vòng đỏ (Bypass Anti-Cheat)
+            if inDanger then
+                -- Boss đang vận chiêu diện rộng: lướt an toàn
                 targetHeight = Config.SafeHoverHeight + 6
                 State.CurrentStatus = "🛡️ Đang né chiêu diện rộng của Boss!"
-                root.AssemblyLinearVelocity = Vector3.new(15, 0, 15)
+                root.AssemblyLinearVelocity = Vector3.new(16, 0, 16)
+            elseif healthPercent < 0.35 then
+                -- Game không tự hồi máu: giữ khoảng cách xa hơn và dồn dame nhanh kết liễu quái
+                targetHeight = Config.SafeHoverHeight + 6
+                State.CurrentStatus = string.format("⚡ Máu yếu (%.0f%%)! Đang giữ khoảng cách & xả skill hồi máu/dứt điểm!", healthPercent * 100)
             else
-                State.CurrentStatus = string.format("⚔️ Diệt %s: %s (Khoảng cách: %dm)", isBossTarget and "BOSS" or "Quái", targetMob.Name, math.floor(shortestDist))
+                local targetType = isRangedTarget and "Quái Bắn Xa" or (isBossTarget and "BOSS" or "Quái Cận Chiến")
+                State.CurrentStatus = string.format("⚔️ Diệt %s: %s (Khoảng cách: %dm)", targetType, targetMob.Name, math.floor(shortestDist))
             end
 
             -- Giữ độ cao an toàn trên đầu quái
@@ -580,9 +635,10 @@ local function ProcessSmartCombat()
             root.CFrame = CFrame.new(safePos, mobRoot.Position)
             root.AssemblyLinearVelocity = Vector3.zero
 
-            -- Xả chiêu thức thông minh
-            CastAllAbilities(isBossTarget, livingMobs)
+            -- Xả chiêu thức thông minh (Ưu tiên hồi máu nếu cần)
+            CastAllAbilities(isBossTarget, livingMobs, healthPercent)
         end
+    end
     end
 end
 
