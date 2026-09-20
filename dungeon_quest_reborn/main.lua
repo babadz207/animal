@@ -299,28 +299,28 @@ local function ClickButton(btn)
     if getconnections then
         local downConns = getconnections(btn.MouseButton1Down)
         local upConns = getconnections(btn.MouseButton1Up)
-        local actConns = getconnections(btn.Activated)
         local clickConns = getconnections(btn.MouseButton1Click)
+        local actConns = getconnections(btn.Activated)
 
-        if (downConns and #downConns > 0) or (upConns and #upConns > 0) then
-            if downConns then
-                for _, c in ipairs(downConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
-                task.wait(0.03)
-            end
-            if upConns then
-                for _, c in ipairs(upConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
-            end
-        elseif actConns and #actConns > 0 then
-            for _, c in ipairs(actConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
-        elseif clickConns and #clickConns > 0 then
+        if downConns then
+            for _, c in ipairs(downConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+        end
+        if upConns then
+            for _, c in ipairs(upConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+        end
+        if clickConns then
             for _, c in ipairs(clickConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
+        end
+        if actConns then
+            for _, c in ipairs(actConns) do if c.Enabled then pcall(function() c:Fire() end) clicked = true end end
         end
     end
 
-    if not clicked and typeof(firesignal) == "function" then
+    if typeof(firesignal) == "function" then
         pcall(function() firesignal(btn.MouseButton1Down) end)
-        task.wait(0.03)
         pcall(function() firesignal(btn.MouseButton1Up) end)
+        pcall(function() firesignal(btn.MouseButton1Click) end)
+        pcall(function() firesignal(btn.Activated) end)
         clicked = true
     end
 
