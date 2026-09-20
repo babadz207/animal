@@ -115,7 +115,8 @@ local Config = {
     CombatRangeWarrior = 9.5,     -- Cự ly đánh của Chiến binh
     KiteDistanceMage = 14,        -- Cự ly bắt đầu lùi né đòn thường của Pháp sư (quái cận chiến tầm đánh 6 studs)
     KiteDistanceWarrior = 7.5,    -- Cự ly bắt đầu lùi của Chiến binh
-    AutoSpamSkills = true,        -- Tự xả chiêu thức thông minh (Q/E, Backpack, Swap set)
+    AutoSpamSkills = true,        -- Tự xả chiêu thức thông minh (Q/E, Backpack theo cự ly)
+    AutoSwapSkills = false,       -- TẮT ĐỔI BỘ SKILL LIÊN TỤC (Giữ nguyên bộ kỹ năng chính, tránh giật nháy hotbar)
     BossEvadeDistance = 20,       -- Khoảng cách né an toàn khi Boss tung vòng đỏ
     
     -- Stats & Progression
@@ -873,11 +874,45 @@ end
 local PathfindingService = game:GetService("PathfindingService")
 local lastSwapTime = 0
 
+local function GetCooldownRemaining(btnContainer)
+    if not btnContainer then return 0 end
+    local cd = btnContainer:FindFirstChild("cooldownNumber", true)
+    if cd and cd.Visible and cd.Text ~= "" then
+        local num = tonumber(cd.Text:match("[%d%.]+"))
+        return num or 0
+    end
+    return 0
+end
+
+local function IsOnCooldown(btnContainer)
+    return GetCooldownRemaining(btnContainer) > 0.1
+end
+
+local function AreCurrentSkillsOnLongCooldown()
+    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    if not abilitiesGui then return false end
+
+    local leftBtn = abilitiesGui:FindFirstChild("LeftAbility", true)
+    local rightBtn = abilitiesGui:FindFirstChild("RightAbility", true)
+
+    local qCd = GetCooldownRemaining(leftBtn)
+    local eCd = GetCooldownRemaining(rightBtn)
+
+    -- Chỉ coi là hồi lâu nếu CẢ 2 chiêu đều còn hơn 3.5s (tránh đổi liên tục khi skill sắp hồi như 0.6s hay 1.1s)
+    return (qCd > 3.5) and (eCd > 3.5)
+end
+
 local function SwapAbilitySet()
-    if os.clock() - lastSwapTime < 0.6 then return false end
-    lastSwapTime = os.clock()
+    if not Config.AutoSwapSkills then return false end
+    if os.clock() - lastSwapTime < 4.0 then return false end -- Tối thiểu 4s mới được đổi lại
 
     local abilitiesGui = PlayerGui:FindFirstChild("abilities")
+    local canSwapLabel = abilitiesGui and abilitiesGui:FindFirstChild("CanSwap", true)
+    local canSwapReady = canSwapLabel and canSwapLabel.Visible and canSwapLabel.Text:lower():find("swap")
+    if not canSwapReady then return false end
+
+    lastSwapTime = os.clock()
+
     local swapBtn = abilitiesGui and abilitiesGui:FindFirstChild("Swap", true)
     if swapBtn and swapBtn:IsA("GuiButton") then
         ClickButton(swapBtn)
@@ -890,26 +925,6 @@ local function SwapAbilitySet()
         return true
     end
     return false
-end
-
-local function IsOnCooldown(btnContainer)
-    if not btnContainer then return false end
-    local cd = btnContainer:FindFirstChild("cooldownNumber", true)
-    if cd and cd.Visible and cd.Text ~= "" then
-        local num = tonumber(cd.Text:match("[%d%.]+"))
-        if num and num > 0.1 then return true end
-    end
-    return false
-end
-
-local function AreCurrentSkillsOnCooldown()
-    local abilitiesGui = PlayerGui:FindFirstChild("abilities")
-    if not abilitiesGui then return false end
-
-    local leftBtn = abilitiesGui:FindFirstChild("LeftAbility", true)
-    local rightBtn = abilitiesGui:FindFirstChild("RightAbility", true)
-
-    return IsOnCooldown(leftBtn) and IsOnCooldown(rightBtn)
 end
 
 --------------------------------------------------------------------------------
@@ -1348,10 +1363,8 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
         end
     end
 
-    -- 4. Nếu cả 2 chiêu đang hồi HOẶC game báo "Can swap": Tự động đổi sang bộ kỹ năng thứ 2 để xả tiếp
-    local canSwapLabel = abilitiesGui and abilitiesGui:FindFirstChild("CanSwap", true)
-    local canSwapReady = canSwapLabel and canSwapLabel.Visible and canSwapLabel.Text:lower():find("swap")
-    if AreCurrentSkillsOnCooldown() or canSwapReady then
+    -- 4. Nếu bật AutoSwapSkills VÀ cả 2 chiêu đều đang hồi rất lâu (> 3.5s): Mới đổi sang bộ kỹ năng thứ 2
+    if Config.AutoSwapSkills and AreCurrentSkillsOnLongCooldown() then
         SwapAbilitySet()
     end
 end
