@@ -62,7 +62,8 @@ local qot = queue_on_teleport or queueonteleport
 
 local TeleportScript = [[
     repeat task.wait() until game:IsLoaded()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_kaitun.lua?t=" .. tostring(tick())))()
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/mcp_loader.lua"))() end)
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_kaitun.lua?t=" .. tostring(tick())))() end)
 ]]
 
 local function QueueReconnect()
