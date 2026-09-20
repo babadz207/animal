@@ -103,11 +103,13 @@ end)
 local Config = {
     -- Game Flow
     AutoEnterGame = true,         -- Tự động bấm Play & Bỏ qua hướng dẫn
-    AutoProgressionDungeon = true,-- Tự động chọn Dungeon cao nhất theo Level
-    FixedDungeon = "Desert Temple",-- Dùng khi AutoProgressionDungeon = false
-    Difficulty = "Easy",          -- "Easy", "Medium", "Hard", "Insane", "Nightmare"
-    HardcoreMode = false,         -- Bật nếu muốn cày thêm 20% may mắn & exp
-    PrivateLobby = true,          -- Tạo phòng riêng tư không bị quấy rối
+    AutoEnterGame = true,             -- Tự động bấm Play & Bỏ qua hướng dẫn
+    AutoProgressionDungeon = true,    -- Tự động chọn Dungeon cao nhất theo Level
+    AutoProgressionDifficulty = true, -- TỰ ĐỘNG CHỌN ĐỘ KHÓ CAO NHẤT THEO LEVEL (Easy -> Medium -> Hard -> Insane -> Nightmare)
+    FixedDungeon = "Desert Temple",   -- Dùng khi AutoProgressionDungeon = false
+    Difficulty = "Easy",              -- Độ khó mặc định / dùng khi AutoProgressionDifficulty = false
+    HardcoreMode = false,             -- Bật nếu muốn cày thêm 20% may mắn & exp
+    PrivateLobby = true,              -- Tạo phòng riêng tư không bị quấy rối
     
     -- Combat & Movement (Đi bộ tiếp cận, Đánh thường, Xả skill & Đi lùi thông minh)
     KillAura = true,              -- Tự động đánh quái & Boss
@@ -141,34 +143,134 @@ local Config = {
 }
 
 --------------------------------------------------------------------------------
--- 2. DUNGEON LEVEL PROGRESSION TABLE
+-- 2. DUNGEON & DIFFICULTY PROGRESSION TABLE (TỰ ĐỘNG CHỌN MAP & ĐỘ KHÓ CAO NHẤT)
 --------------------------------------------------------------------------------
-local DUNGEON_TIERS = {
-    { Name = "Gilded Skies",       MinLevel = 190 },
-    { Name = "Oni Dungeon",        MinLevel = 175 },
-    { Name = "Northern Lands",     MinLevel = 160 },
-    { Name = "Enchanted Forest",   MinLevel = 145 },
-    { Name = "Aquatic Temple",     MinLevel = 130 },
-    { Name = "Volcanic Chambers",  MinLevel = 115 },
-    { Name = "Orbital Outpost",    MinLevel = 100 },
-    { Name = "Steampunk Sewers",   MinLevel = 85 },
-    { Name = "The Canals",         MinLevel = 70 },
-    { Name = "Samurai Palace",     MinLevel = 55 },
-    { Name = "The Underworld",     MinLevel = 40 },
-    { Name = "King's Castle",      MinLevel = 30 },
-    { Name = "Pirate Island",      MinLevel = 20 },
-    { Name = "Winter Outpost",     MinLevel = 10 },
-    { Name = "Desert Temple",      MinLevel = 1 },
+local DUNGEON_PROGRESSION = {
+    -- Desert Temple (Lv 1 - 29)
+    { Dungeon = "Desert Temple",   Difficulty = "Nightmare", MinLevel = 27 },
+    { Dungeon = "Desert Temple",   Difficulty = "Insane",    MinLevel = 20 },
+    { Dungeon = "Desert Temple",   Difficulty = "Hard",      MinLevel = 12 },
+    { Dungeon = "Desert Temple",   Difficulty = "Medium",    MinLevel = 6 },
+    { Dungeon = "Desert Temple",   Difficulty = "Easy",      MinLevel = 1 },
+
+    -- Winter Outpost (Lv 30 - 49)
+    { Dungeon = "Winter Outpost",  Difficulty = "Nightmare", MinLevel = 55 },
+    { Dungeon = "Winter Outpost",  Difficulty = "Insane",    MinLevel = 50 },
+    { Dungeon = "Winter Outpost",  Difficulty = "Hard",      MinLevel = 45 },
+    { Dungeon = "Winter Outpost",  Difficulty = "Medium",    MinLevel = 38 },
+    { Dungeon = "Winter Outpost",  Difficulty = "Easy",      MinLevel = 30 },
+
+    -- Pirate Island (Lv 40 - 59)
+    { Dungeon = "Pirate Island",   Difficulty = "Nightmare", MinLevel = 65 },
+    { Dungeon = "Pirate Island",   Difficulty = "Insane",    MinLevel = 60 },
+    { Dungeon = "Pirate Island",   Difficulty = "Hard",      MinLevel = 55 },
+    { Dungeon = "Pirate Island",   Difficulty = "Medium",    MinLevel = 48 },
+    { Dungeon = "Pirate Island",   Difficulty = "Easy",      MinLevel = 40 },
+
+    -- King's Castle (Lv 50 - 69)
+    { Dungeon = "King's Castle",   Difficulty = "Nightmare", MinLevel = 75 },
+    { Dungeon = "King's Castle",   Difficulty = "Insane",    MinLevel = 70 },
+    { Dungeon = "King's Castle",   Difficulty = "Hard",      MinLevel = 65 },
+    { Dungeon = "King's Castle",   Difficulty = "Medium",    MinLevel = 58 },
+    { Dungeon = "King's Castle",   Difficulty = "Easy",      MinLevel = 50 },
+
+    -- The Underworld (Lv 60 - 79)
+    { Dungeon = "The Underworld",  Difficulty = "Nightmare", MinLevel = 85 },
+    { Dungeon = "The Underworld",  Difficulty = "Insane",    MinLevel = 80 },
+    { Dungeon = "The Underworld",  Difficulty = "Hard",      MinLevel = 75 },
+    { Dungeon = "The Underworld",  Difficulty = "Medium",    MinLevel = 68 },
+    { Dungeon = "The Underworld",  Difficulty = "Easy",      MinLevel = 60 },
+
+    -- Samurai Palace (Lv 70 - 84)
+    { Dungeon = "Samurai Palace",  Difficulty = "Nightmare", MinLevel = 95 },
+    { Dungeon = "Samurai Palace",  Difficulty = "Insane",    MinLevel = 90 },
+    { Dungeon = "Samurai Palace",  Difficulty = "Hard",      MinLevel = 85 },
+    { Dungeon = "Samurai Palace",  Difficulty = "Medium",    MinLevel = 78 },
+    { Dungeon = "Samurai Palace",  Difficulty = "Easy",      MinLevel = 70 },
+
+    -- The Canals (Lv 80 - 89)
+    { Dungeon = "The Canals",      Difficulty = "Nightmare", MinLevel = 105 },
+    { Dungeon = "The Canals",      Difficulty = "Insane",    MinLevel = 100 },
+    { Dungeon = "The Canals",      Difficulty = "Hard",      MinLevel = 95 },
+    { Dungeon = "The Canals",      Difficulty = "Medium",    MinLevel = 88 },
+    { Dungeon = "The Canals",      Difficulty = "Easy",      MinLevel = 80 },
+
+    -- Steampunk Sewers (Lv 85 - 99)
+    { Dungeon = "Steampunk Sewers",Difficulty = "Nightmare", MinLevel = 115 },
+    { Dungeon = "Steampunk Sewers",Difficulty = "Insane",    MinLevel = 110 },
+    { Dungeon = "Steampunk Sewers",Difficulty = "Hard",      MinLevel = 100 },
+    { Dungeon = "Steampunk Sewers",Difficulty = "Medium",    MinLevel = 92 },
+    { Dungeon = "Steampunk Sewers",Difficulty = "Easy",      MinLevel = 85 },
+
+    -- Orbital Outpost (Lv 100+)
+    { Dungeon = "Orbital Outpost", Difficulty = "Nightmare", MinLevel = 130 },
+    { Dungeon = "Orbital Outpost", Difficulty = "Insane",    MinLevel = 120 },
+    { Dungeon = "Orbital Outpost", Difficulty = "Hard",      MinLevel = 112 },
+    { Dungeon = "Orbital Outpost", Difficulty = "Medium",    MinLevel = 105 },
+    { Dungeon = "Orbital Outpost", Difficulty = "Easy",      MinLevel = 100 },
+
+    -- Volcanic Chambers (Lv 115+)
+    { Dungeon = "Volcanic Chambers",Difficulty = "Nightmare",MinLevel = 145 },
+    { Dungeon = "Volcanic Chambers",Difficulty = "Insane",   MinLevel = 135 },
+    { Dungeon = "Volcanic Chambers",Difficulty = "Hard",     MinLevel = 125 },
+    { Dungeon = "Volcanic Chambers",Difficulty = "Medium",   MinLevel = 120 },
+    { Dungeon = "Volcanic Chambers",Difficulty = "Easy",     MinLevel = 115 },
+
+    -- Aquatic Temple (Lv 130+)
+    { Dungeon = "Aquatic Temple",  Difficulty = "Nightmare", MinLevel = 160 },
+    { Dungeon = "Aquatic Temple",  Difficulty = "Insane",    MinLevel = 150 },
+    { Dungeon = "Aquatic Temple",  Difficulty = "Hard",      MinLevel = 140 },
+    { Dungeon = "Aquatic Temple",  Difficulty = "Medium",    MinLevel = 135 },
+    { Dungeon = "Aquatic Temple",  Difficulty = "Easy",      MinLevel = 130 },
+
+    -- Enchanted Forest (Lv 145+)
+    { Dungeon = "Enchanted Forest",Difficulty = "Nightmare", MinLevel = 175 },
+    { Dungeon = "Enchanted Forest",Difficulty = "Insane",    MinLevel = 165 },
+    { Dungeon = "Enchanted Forest",Difficulty = "Hard",      MinLevel = 155 },
+    { Dungeon = "Enchanted Forest",Difficulty = "Medium",    MinLevel = 150 },
+    { Dungeon = "Enchanted Forest",Difficulty = "Easy",      MinLevel = 145 },
+
+    -- Northern Lands (Lv 160+)
+    { Dungeon = "Northern Lands",  Difficulty = "Nightmare", MinLevel = 190 },
+    { Dungeon = "Northern Lands",  Difficulty = "Insane",    MinLevel = 180 },
+    { Dungeon = "Northern Lands",  Difficulty = "Hard",      MinLevel = 170 },
+    { Dungeon = "Northern Lands",  Difficulty = "Medium",    MinLevel = 165 },
+    { Dungeon = "Northern Lands",  Difficulty = "Easy",      MinLevel = 160 },
+
+    -- Oni Dungeon (Lv 175+)
+    { Dungeon = "Oni Dungeon",     Difficulty = "Nightmare", MinLevel = 205 },
+    { Dungeon = "Oni Dungeon",     Difficulty = "Insane",    MinLevel = 195 },
+    { Dungeon = "Oni Dungeon",     Difficulty = "Hard",      MinLevel = 185 },
+    { Dungeon = "Oni Dungeon",     Difficulty = "Medium",    MinLevel = 180 },
+    { Dungeon = "Oni Dungeon",     Difficulty = "Easy",      MinLevel = 175 },
+
+    -- Gilded Skies (Lv 190+)
+    { Dungeon = "Gilded Skies",    Difficulty = "Nightmare", MinLevel = 220 },
+    { Dungeon = "Gilded Skies",    Difficulty = "Insane",    MinLevel = 210 },
+    { Dungeon = "Gilded Skies",    Difficulty = "Hard",      MinLevel = 200 },
+    { Dungeon = "Gilded Skies",    Difficulty = "Medium",    MinLevel = 195 },
+    { Dungeon = "Gilded Skies",    Difficulty = "Easy",      MinLevel = 190 },
 }
 
-local function GetBestDungeonForLevel(level)
+local function GetBestDungeonProgression(level)
     level = tonumber(level) or 1
-    for _, d in ipairs(DUNGEON_TIERS) do
-        if level >= d.MinLevel then
-            return d.Name
+    local bestDungeon = "Desert Temple"
+    local bestDiff = "Easy"
+    local highestMinLvl = -1
+
+    for _, entry in ipairs(DUNGEON_PROGRESSION) do
+        if level >= entry.MinLevel and entry.MinLevel > highestMinLvl then
+            highestMinLvl = entry.MinLevel
+            bestDungeon = entry.Dungeon
+            bestDiff = entry.Difficulty
         end
     end
-    return "Desert Temple"
+    return bestDungeon, bestDiff
+end
+
+local function GetBestDungeonForLevel(level)
+    local d, _ = GetBestDungeonProgression(level)
+    return d
 end
 
 --------------------------------------------------------------------------------
@@ -177,6 +279,7 @@ end
 local State = {
     CurrentStatus = "Khởi động...",
     DungeonTarget = "Desert Temple",
+    DifficultyTarget = "Easy",
     CurrentWave = 0,
     EnemiesRemaining = 0,
     TotalDungeonsCompleted = 0,
@@ -689,8 +792,19 @@ local function ProcessLobbyProgression()
 
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
     local playerLvl = GetPlayerLevel()
-    local targetDungeon = Config.AutoProgressionDungeon and GetBestDungeonForLevel(playerLvl) or Config.FixedDungeon
+    local targetDungeon = Config.FixedDungeon or "Desert Temple"
+    local targetDiff = Config.Difficulty or "Easy"
+
+    if Config.AutoProgressionDungeon then
+        local autoDungeon, autoDiff = GetBestDungeonProgression(playerLvl)
+        targetDungeon = autoDungeon
+        if Config.AutoProgressionDifficulty ~= false then
+            targetDiff = autoDiff
+        end
+    end
+
     State.DungeonTarget = targetDungeon
+    State.DifficultyTarget = targetDiff
 
     -- 1. KIỂM TRA ĐÃ CÓ PHÒNG CHƯA (Workspace.games.inLobby[Player.Name])
     local gamesFolder = workspace:FindFirstChild("games")
@@ -698,7 +812,7 @@ local function ProcessLobbyProgression()
     local myLobby = inLobbyFolder and inLobbyFolder:FindFirstChild(LocalPlayer.Name)
 
     if myLobby then
-        State.CurrentStatus = "Đã có phòng! Xuất phát vào: " .. targetDungeon .. "..."
+        State.CurrentStatus = "Đã có phòng! Xuất phát vào: " .. targetDungeon .. " (" .. targetDiff .. ")..."
         QueueReconnect()
 
         -- Kích hoạt remote bắt đầu trận
@@ -762,7 +876,7 @@ local function ProcessLobbyProgression()
         -- B. Màn hình chọn Dungeon & Độ khó (chooseDungeon):
         local choose = queueGui:FindFirstChild("chooseDungeon")
         if choose and choose.Visible then
-            State.CurrentStatus = string.format("Tạo phòng: %s (%s)", targetDungeon, Config.Difficulty)
+            State.CurrentStatus = string.format("Tạo phòng: %s (%s)", targetDungeon, targetDiff)
 
             -- Chọn Dungeon
             local scroll = choose:FindFirstChild("ScrollingFrame", true)
@@ -774,7 +888,7 @@ local function ProcessLobbyProgression()
 
             -- Chọn Độ khó
             local right = choose:FindFirstChild("backgroundFillRight")
-            local diffBtn = right and right:FindFirstChild(Config.Difficulty) and right[Config.Difficulty]:FindFirstChild("TextButton")
+            local diffBtn = right and right:FindFirstChild(targetDiff) and right[targetDiff]:FindFirstChild("TextButton")
             if diffBtn then
                 ClickButton(diffBtn)
                 task.wait(0.15)
@@ -800,7 +914,7 @@ local function ProcessLobbyProgression()
             -- Đồng thời gọi Remote createLobby trực tiếp để đảm bảo 100%
             if remotes and remotes:FindFirstChild("createLobby") then
                 pcall(function()
-                    remotes.createLobby:InvokeServer(targetDungeon, Config.Difficulty, false, 0, Config.PrivateLobby)
+                    remotes.createLobby:InvokeServer(targetDungeon, targetDiff, false, 0, Config.PrivateLobby)
                 end)
             end
 
@@ -1717,9 +1831,28 @@ local function ProcessAutoReplay()
     if dungeonComplete == true or (replayBtn and replayBtn.Visible) then
         hasReplayedThisDungeon = true
         State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-        State.CurrentStatus = "Chiến thắng! Đang bấm Replay trận mới..."
         QueueReconnect()
 
+        -- Kiểm tra nếu người chơi vừa lên cấp và đủ điều kiện mở Dungeon / Độ khó mới:
+        local currentLvl = GetPlayerLevel()
+        local nextDungeon, nextDiff = GetBestDungeonProgression(currentLvl)
+        local isCurrentTier = (nextDungeon == State.DungeonTarget and nextDiff == (State.DifficultyTarget or Config.Difficulty))
+
+        if Config.AutoProgressionDungeon and not isCurrentTier then
+            State.CurrentStatus = string.format("🎉 Lên cấp %d! Chuyển sang mốc mới: %s (%s)...", currentLvl, nextDungeon, nextDiff)
+            local returnBtn = PlayerGui:FindFirstChild("ReturnConfirmation", true) or (replayGui and replayGui:FindFirstChild("return", true))
+            if returnBtn and returnBtn:IsA("GuiButton") then
+                ClickButton(returnBtn)
+            end
+            local remotes = ReplicatedStorage:FindFirstChild("remotes")
+            if remotes and remotes:FindFirstChild("returnToLobby") then
+                pcall(function() remotes.returnToLobby:FireServer() end)
+            end
+            task.wait(2.5)
+            return
+        end
+
+        State.CurrentStatus = "Chiến thắng! Đang bấm Replay trận mới..."
         local remotes = ReplicatedStorage:FindFirstChild("remotes")
         if remotes and remotes:FindFirstChild("replayDungeon") then
             pcall(function() remotes.replayDungeon:FireServer() end)
@@ -1845,7 +1978,7 @@ local function CreateDashboard()
             local inDung = IsInDungeon()
 
             statusLbl.Text = "📌 " .. tostring(State.CurrentStatus)
-            mapLbl.Text = "🏰 Map: " .. tostring(State.DungeonTarget) .. " (" .. Config.Difficulty .. ")"
+            mapLbl.Text = "🏰 Map: " .. tostring(State.DungeonTarget) .. " (" .. tostring(State.DifficultyTarget or Config.Difficulty) .. ")"
             levelLbl.Text = string.format("⭐ Cấp độ: Lv.%d | Điểm thừa: %d", playerLvl, LocalPlayer:FindFirstChild("skillPoints") and LocalPlayer.skillPoints.Value or 0)
             
             if inDung then
