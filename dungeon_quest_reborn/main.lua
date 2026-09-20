@@ -720,7 +720,6 @@ local function ProcessSmartCombat()
         end
     end
 end
-end
 
 --------------------------------------------------------------------------------
 -- 11. AUTO REPLAY & REWARD CLAIM
