@@ -32,6 +32,14 @@ if success and connectorCode then
             end
         end)
         print("[Roblox-MCP] Đã khởi chạy connector thread!")
+
+        -- Tự động nạp lại khi dịch chuyển giữa Lobby và Dungeon
+        local queue_on_teleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+        if queue_on_teleport then
+            queue_on_teleport([[
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/mcp_loader.lua"))()
+            ]])
+        end
     else
         warn("[Roblox-MCP] Lỗi biên dịch connector: " .. tostring(err))
     end
