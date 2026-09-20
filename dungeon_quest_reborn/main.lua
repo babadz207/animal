@@ -1341,7 +1341,12 @@ local function GetDynamicCombatProfile(currentDist)
             end
         end
 
-        if hasRangedReady and (not hasMeleeReady or (currentDist and currentDist > 12)) then
+        -- Nếu người chơi cầm vũ khí tầm xa (Wand/Staff/Bow) HOẶC có chiêu tầm xa sẵn sàng:
+        -- Luôn ưu tiên giữ cự ly TẦM XA (16-18 studs) an toàn, tuyệt đối không lao cận chiến tự sát!
+        if weaponRange.isRanged then
+            chosenProfile = hasRangedReady and hasRangedReady.profile or weaponRange
+            activeSkillInfo = string.format("%s (Pháp sư tầm xa: %dm)", hasRangedReady and hasRangedReady.name or "Gậy phép", math.floor(chosenProfile.preferred))
+        elseif hasRangedReady and (not hasMeleeReady or (currentDist and currentDist > 10)) then
             chosenProfile = hasRangedReady.profile
             activeSkillInfo = string.format("%s (Chiêu %s - Tầm xa: %dm)", hasRangedReady.name, hasRangedReady.slot, math.floor(chosenProfile.preferred))
         elseif hasMeleeReady then
