@@ -1131,29 +1131,131 @@ local function GetDynamicCombatProfile(currentDist)
     }
 end
 
--- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast)
-local function HasLineOfSight(fromPos, toPos, ignoreList)
+--------------------------------------------------------------------------------
+-- 10. DI CHUYỂN, TẦM NHÌN (LINE OF SIGHT) & ĐIỀU HƯỚNG CHỐNG KẸT TƯỜNG
+--------------------------------------------------------------------------------
+
+-- Bộ điều phối di chuyển mượt mà (chống giật lag, chống spam MoveTo làm khựng nhân vật)
+local lastMoveCommandTime = 0
+local lastMoveDestination = nil
+local lastJumpTime = 0
+local lastPlayerPos = nil
+local lastPlayerMoveTime = 0
+local strafeSign = 1
+local lastStrafeSwitch = 0
+
+local function SmoothMoveTo(hum, targetPos, forceImmediate)
+    if not hum or not targetPos then return end
+    local now = os.clock()
+    if forceImmediate or not lastMoveDestination or (now - lastMoveCommandTime > 0.35) or ((targetPos - lastMoveDestination).Magnitude > 3.0) then
+        lastMoveCommandTime = now
+        lastMoveDestination = targetPos
+        hum:MoveTo(targetPos)
+    end
+end
+
+-- Danh sách bỏ qua Raycast (Người chơi, đồng đội, quái vật, vfx) để chỉ bắt đúng TƯỜNG CỨNG & VẬT CẢN BẢN ĐỒ
+local function GetRaycastIgnoreList()
+    local ignore = {}
+    local char = LocalPlayer.Character
+    if char then table.insert(ignore, char) end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character and p.Character ~= char then
+            table.insert(ignore, p.Character)
+        end
+    end
+
+    local dung = workspace:FindFirstChild("dungeon")
+    if dung then
+        for _, room in ipairs(dung:GetChildren()) do
+            local ef = room:FindFirstChild("enemyFolder")
+            if ef then table.insert(ignore, ef) end
+        end
+    end
+
+    local efLegacy = workspace:FindFirstChild("enemies") or workspace:FindFirstChild("enemyFolder")
+    if efLegacy then table.insert(ignore, efLegacy) end
+
+    local vfx = workspace:FindFirstChild("vfxPool") or workspace:FindFirstChild("abilities")
+    if vfx then table.insert(ignore, vfx) end
+
+    return ignore
+end
+
+-- Kiểm tra Tầm nhìn thẳng (Line of Sight Raycast chống kẹt tường)
+-- Quét tia từ ngực người chơi tới ngực mục tiêu, bỏ qua các part tàng hình/hiệu ứng/không va chạm
+local function IsTargetVisible(fromPos, toPos, extraIgnore)
+    local currentFrom = fromPos + Vector3.new(0, 2, 0)
+    local currentTo = toPos + Vector3.new(0, 2, 0)
+    local dir = currentTo - currentFrom
+    local totalDist = dir.Magnitude
+    if totalDist < 0.5 then return true end
+
+    local ignoreList = GetRaycastIgnoreList()
+    if extraIgnore then
+        if typeof(extraIgnore) == "table" then
+            for _, item in ipairs(extraIgnore) do table.insert(ignoreList, item) end
+        else
+            table.insert(ignoreList, extraIgnore)
+        end
+    end
+
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = ignoreList or {}
-    
-    local dir = toPos - fromPos
-    local result = workspace:Raycast(fromPos, dir, rayParams)
-    return result == nil
+
+    -- Cho phép quét xuyên qua tối đa 6 part không va chạm / hiệu ứng (như genericNeonBall, triggers)
+    for _ = 1, 6 do
+        rayParams.FilterDescendantsInstances = ignoreList
+        local hit = workspace:Raycast(currentFrom, dir, rayParams)
+        if not hit then
+            return true -- Thông thoáng, nhìn thấy trực tiếp!
+        end
+
+        local part = hit.Instance
+        -- Nếu chạm vào tường cứng, cột, sàn (CanCollide = true và không tàng hình)
+        if part.CanCollide and part.Transparency < 0.9 then
+            return false, part, hit.Distance -- Bị tường / chướng ngại vật che khuất!
+        end
+
+        -- Part vô hình, trigger, genericNeonBall, effect không có va chạm -> Bỏ qua và quét tiếp
+        table.insert(ignoreList, part)
+        currentFrom = hit.Position + dir.Unit * 0.2
+        dir = currentTo - currentFrom
+        if dir.Magnitude < 0.5 then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Tương thích ngược với các lệnh gọi HasLineOfSight cũ
+local function HasLineOfSight(fromPos, toPos, ignoreList)
+    return IsTargetVisible(fromPos, toPos, ignoreList)
 end
 
 -- Kiểm tra vật cản (tường, cột) theo một hướng để né khi đi lùi
 local function CheckDirectionClear(fromPos, dir, distance)
+    local checkFrom = fromPos + Vector3.new(0, 1.5, 0)
+    local checkDir = dir.Unit * distance
+    local ignoreList = GetRaycastIgnoreList()
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    local ignore = {LocalPlayer.Character}
-    local ef = workspace:FindFirstChild("enemyFolder") or (workspace:FindFirstChild("dungeon") and workspace.dungeon:FindFirstChild("enemyFolder", true))
-    if ef then table.insert(ignore, ef) end
-    rayParams.FilterDescendantsInstances = ignore
 
-    local result = workspace:Raycast(fromPos, dir * distance, rayParams)
-    local hitDist = result and result.Distance or distance
-    return (result == nil), hitDist
+    for _ = 1, 4 do
+        rayParams.FilterDescendantsInstances = ignoreList
+        local hit = workspace:Raycast(checkFrom, checkDir, rayParams)
+        if not hit then
+            return true, distance
+        end
+        local part = hit.Instance
+        if part.CanCollide and part.Transparency < 0.9 then
+            return false, hit.Distance -- Có tường cản trở ở khoảng cách hit.Distance
+        end
+        table.insert(ignoreList, part)
+    end
+    return true, distance
 end
 
 -- Tìm vòng đỏ / telegraph đòn đánh của Boss trong khu vực
@@ -1218,7 +1320,7 @@ local function FollowWaypoints(targetPos)
         local wp = cachedPathWaypoints[currentWaypointIndex]
         if wp then
             local wpDist = (Vector3.new(wp.Position.X, root.Position.Y, wp.Position.Z) - root.Position).Magnitude
-            if wpDist < 3.5 then
+            if wpDist < 4.0 then
                 currentWaypointIndex = currentWaypointIndex + 1
                 if cachedPathWaypoints[currentWaypointIndex] then
                     wp = cachedPathWaypoints[currentWaypointIndex]
@@ -1228,11 +1330,11 @@ local function FollowWaypoints(targetPos)
                 if wp.Action == Enum.PathWaypointAction.Jump then
                     hum.Jump = true
                 end
-                hum:MoveTo(wp.Position)
+                SmoothMoveTo(hum, wp.Position, false)
             end
         end
     else
-        hum:MoveTo(targetPos)
+        SmoothMoveTo(hum, targetPos, false)
     end
 end
 
@@ -1369,24 +1471,6 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent, targetDist, ski
     end
 end
 
--- Bộ điều phối di chuyển mượt mà (chống giật lag, chống spam MoveTo làm khựng nhân vật)
-local lastMoveCommandTime = 0
-local lastMoveDestination = nil
-local lastJumpTime = 0
-local lastPlayerPos = nil
-local lastPlayerMoveTime = 0
-local strafeSign = 1
-local lastStrafeSwitch = 0
-
-local function SmoothMoveTo(hum, targetPos, forceImmediate)
-    if not hum or not targetPos then return end
-    local now = os.clock()
-    if forceImmediate or not lastMoveDestination or (now - lastMoveCommandTime > 0.35) or ((targetPos - lastMoveDestination).Magnitude > 3.0) then
-        lastMoveCommandTime = now
-        lastMoveDestination = targetPos
-        hum:MoveTo(targetPos)
-    end
-end
 
 local function ProcessSmartCombat()
     if not Config.KillAura then return end
@@ -1417,9 +1501,9 @@ local function ProcessSmartCombat()
         return
     end
 
-    -- 2. TÌM QUÁI VẬT MỤC TIÊU ƯU TIÊN (Quái gần nhất còn sống)
+    -- 2. TÌM QUÁI VẬT MỤC TIÊU ƯU TIÊN (Ưu tiên quái nhìn thấy được & gần nhất)
     local targetMob = nil
-    local shortestDist = math.huge
+    local shortestEffectiveDist = math.huge
     local livingMobs = #allMobs
     local isBossTarget = false
 
@@ -1428,8 +1512,16 @@ local function ProcessSmartCombat()
         local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChild("Torso")
         if mobHum and mobHum.Health > 0 and mobRoot then
             local dist = (mobRoot.Position - root.Position).Magnitude
-            if dist < shortestDist then
-                shortestDist = dist
+            -- Ưu tiên quái nhìn thấy được (Visible): Trừ 60 studs cự ly hiệu dụng
+            -- Giúp nhân vật luôn dọn sạch quái trong cùng phòng/hành lang trước, KHÔNG BAO GIỜ bị hút vào quái sau bức tường!
+            local isVis = false
+            if dist < 90 then
+                isVis = IsTargetVisible(root.Position, mobRoot.Position, mob)
+            end
+            local effectiveDist = dist - (isVis and 60 or 0)
+
+            if effectiveDist < shortestEffectiveDist then
+                shortestEffectiveDist = effectiveDist
                 targetMob = mob
             end
         end
@@ -1454,6 +1546,19 @@ local function ProcessSmartCombat()
     local enemyHp = math.floor(mobHum.Health)
     local enemyMaxHp = math.floor(mobHum.MaxHealth)
     isBossTarget = (mobHum.MaxHealth > 10000) or (targetMob.Name:lower():find("boss") ~= nil)
+
+    -- KIỂM TRA TẦM NHÌN (LINE OF SIGHT): QUÁI CÓ BỊ TƯỜNG CHE KHUẤT KHÔNG?
+    local isTargetVis = IsTargetVisible(root.Position, mobRoot.Position, targetMob)
+
+    -- NẾU QUÁI BỊ TƯỜNG CHE KHUẤT (NOT VISIBLE):
+    -- Tuyệt đối KHÔNG chạy thẳng vào tường! KHÔNG đứng cự ly vàng hay lùi né trước bức tường!
+    -- KHÔNG xả skill hay đánh thường vào tường vô ích!
+    -- BẮT BUỘC DÙNG PATHFINDING TÌM ĐƯỜNG VÒNG QUA CỬA / HÀNH LANG!
+    if not isTargetVis then
+        State.CurrentStatus = string.format("🧭 Tìm đường qua tường tới %s (Cách: %dm)", targetMob.Name, math.floor(dist))
+        FollowWaypoints(mobRoot.Position)
+        return
+    end
 
     -- 3. TÍNH TOÁN CỰ LI CHIẾN ĐẤU ĐỘNG THEO TỪNG CHIÊU THỨC & VŨ KHÍ HIỆN TẠI
     local combatProfile, activeSkillInfo, skillsDebug = GetDynamicCombatProfile(dist)
@@ -1543,19 +1648,9 @@ local function ProcessSmartCombat()
         SmoothMoveTo(hum, goldenTarget, false)
 
     else
-        -- C. Ở XA: Tiếp cận quái
-        local closeApproachDist = safeMaxDist + 5
-        if dist <= closeApproachDist then
-            SmoothMoveTo(hum, mobRoot.Position, false)
-        else
-            State.CurrentStatus = string.format("🏃 Tiếp cận %s [%s] (Cách: %dm | HP: %d/%d)", targetMob.Name, activeSkillInfo, math.floor(dist), enemyHp, enemyMaxHp)
-            local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
-            if hasLOS then
-                SmoothMoveTo(hum, mobRoot.Position, false)
-            else
-                FollowWaypoints(mobRoot.Position)
-            end
-        end
+        -- C. Ở XA: Tiếp cận quái trong tầm nhìn trực tiếp
+        State.CurrentStatus = string.format("🏃 Tiếp cận %s [%s] (Cách: %dm | HP: %d/%d)", targetMob.Name, activeSkillInfo, math.floor(dist), enemyHp, enemyMaxHp)
+        SmoothMoveTo(hum, mobRoot.Position, false)
     end
 
     -- 5. ĐÁNH THƯỜNG VỚI VŨ KHÍ
