@@ -30,14 +30,49 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 
 --------------------------------------------------------------------------------
--- 0. AUTO RECONNECT ON TELEPORT
+-- 0. AUTO-EXECUTE & PERSISTENCE ACROSS ALL MAPS / PLACE IDS
 --------------------------------------------------------------------------------
-local queue_on_teleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-if queue_on_teleport then
-    queue_on_teleport([[
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_reborn/main.lua"))()
-    ]])
+local qot = queue_on_teleport or queueonteleport 
+    or (syn and syn.queue_on_teleport) 
+    or (fluxus and fluxus.queue_on_teleport)
+    or (getgenv and getgenv().queue_on_teleport)
+
+local TeleportScript = [[
+    repeat task.wait() until game:IsLoaded()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_kaitun.lua?t=" .. tostring(tick())))()
+]]
+
+local function QueueReconnect()
+    if qot then
+        pcall(function()
+            qot(TeleportScript)
+        end)
+    end
 end
+
+-- Kích hoạt queue ngay khi khởi động
+QueueReconnect()
+
+-- Lắng nghe sự kiện chuyển map của Roblox
+pcall(function()
+    LocalPlayer.OnTeleport:Connect(function(teleportState)
+        QueueReconnect()
+    end)
+end)
+
+-- Tự ghi vào thư mục autoexec của executor nếu có hỗ trợ
+pcall(function()
+    if writefile then
+        local possibleFolders = {"autoexec", "scripts/autoexec", "Delta/autoexec", "Fluxus/autoexec"}
+        for _, folder in ipairs(possibleFolders) do
+            if isfolder and isfolder(folder) then
+                writefile(folder .. "/dungeon_quest_kaitun.lua", TeleportScript)
+                print("[DungeonQuest] Auto-execute file written to: " .. folder)
+                break
+            end
+        end
+    end
+end)
 
 --------------------------------------------------------------------------------
 -- 1. CONFIGURATION
@@ -414,6 +449,7 @@ local function ProcessLobbyProgression()
                 and lobbyInfo.startBackground.startFrame:FindFirstChild("startButton")
             if startBtn and startBtn.Visible then
                 State.CurrentStatus = "Bắt đầu vào trận: " .. targetDungeon .. "..."
+                QueueReconnect()
                 ClickButton(startBtn)
                 task.wait(1.5)
             end
@@ -562,6 +598,7 @@ local function ProcessAutoReplay()
         local replayBtn = replayGui:FindFirstChild("Replay")
         if replayBtn and replayBtn.Visible then
             State.CurrentStatus = "Chiến thắng! Đang bấm Replay..."
+            QueueReconnect()
             ClickButton(replayBtn)
             State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
             task.wait(1)
@@ -574,6 +611,7 @@ local function ProcessAutoReplay()
         local rewardHolder = PlayerGui:FindFirstChild("rewardGuiHolder")
         if rewardHolder and #rewardHolder:GetChildren() > 0 then
             State.CurrentStatus = "Nhận thưởng & Tự động Replay..."
+            QueueReconnect()
             pcall(function() remotes.replayDungeon:FireServer() end)
             State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
             task.wait(1)
