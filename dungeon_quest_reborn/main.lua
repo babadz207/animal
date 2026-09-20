@@ -111,10 +111,10 @@ local Config = {
     
     -- Combat & Movement (Đi bộ tiếp cận, Đánh thường, Xả skill & Đi lùi thông minh)
     KillAura = true,              -- Tự động đánh quái & Boss
-    CombatRangeMage = 15,         -- Cự ly đứng bắn của Pháp sư
-    CombatRangeWarrior = 6,       -- Cự ly áp sát của Chiến binh
-    KiteDistanceMage = 10,        -- Cự ly bắt đầu lùi của Pháp sư
-    KiteDistanceWarrior = 4,      -- Cự ly bắt đầu lùi của Chiến binh
+    CombatRangeMage = 18,         -- Cự ly đứng xả skill của Pháp sư (14 - 18 studs)
+    CombatRangeWarrior = 9.5,     -- Cự ly đánh của Chiến binh
+    KiteDistanceMage = 14,        -- Cự ly bắt đầu lùi né đòn thường của Pháp sư (quái cận chiến tầm đánh 6 studs)
+    KiteDistanceWarrior = 7.5,    -- Cự ly bắt đầu lùi của Chiến binh
     AutoSpamSkills = true,        -- Tự xả chiêu thức thông minh (Q/E, Backpack, Swap set)
     BossEvadeDistance = 20,       -- Khoảng cách né an toàn khi Boss tung vòng đỏ
     
@@ -124,11 +124,12 @@ local Config = {
     
     -- Inventory & Economy
     AutoEquipBest = true,         -- Tự trang bị vũ khí, giáp và kỹ năng mạnh nhất
-    AutoSell = true,              -- Tự bán đồ rác
-    SellRarities = {              -- Chỉ bán các phẩm cấp thấp
+    AutoSell = false,             -- MẶC ĐỊNH TẮT: Bảo vệ 100% kho đồ tân thủ, không tự ý bán đồ đầu game!
+    MinLevelToSell = 25,          -- Chỉ tự động bán đồ khi đạt từ Level 25 trở lên
+    SellRarities = {              -- Chỉ bán các phẩm cấp thấp khi đã đủ điều kiện Level
         ["Common"] = true,
-        ["Uncommon"] = true,
-        ["Rare"] = true,
+        ["Uncommon"] = false,     -- Giữ lại Uncommon cho người chơi mới
+        ["Rare"] = false,         -- Giữ lại Rare trở lên
         ["Epic"] = false,         -- Giữ lại Epic trở lên
         ["Legendary"] = false,    -- Tuyệt đối không bán
         ["Mythical"] = false,     -- Tuyệt đối không bán
@@ -181,6 +182,7 @@ local State = {
     AllocatedPoints = 0,
     SoldItemsCount = 0,
     StartTime = os.time(),
+    EquippedBeforeJoin = false,
 }
 
 --------------------------------------------------------------------------------
@@ -530,10 +532,20 @@ local function ProcessAutoEquip()
                 local rScore = RARITY_SCORE[(tostring(item.rarity or "common")):lower()] or 1
                 local power = (tonumber(item.spellPower) or 0) + (tonumber(item.physicalDamage) or 0)
                 local isHeal = IsHealingTool and IsHealingTool(item)
+                local name = tostring(item.name or ""):lower()
+                local isRanged = name:find("fireball") or name:find("orb") or name:find("beam") or name:find("bolt") or name:find("blast") or name:find("missile")
+
+                -- Ưu tiên kỹ năng: Hồi máu > Phép tầm xa cho Mage > Sát thương
+                local score = power * 5 + rScore * 10
+                if isHeal then score = score + 2000 end
+                if isRanged and isMage then score = score + 1000 end
+
                 table.insert(sortedAbilities, {
                     num = num,
                     name = item.name,
-                    score = (isHeal and 1000 or 0) + power * 5 + rScore * 10,
+                    score = score,
+                    isRanged = isRanged,
+                    isHeal = isHeal,
                     equipped = item.equipped or {},
                 })
             end
@@ -541,6 +553,8 @@ local function ProcessAutoEquip()
         table.sort(sortedAbilities, function(a, b) return a.score > b.score end)
 
         local slots = {"e", "q", "e2", "q2"}
+        local unequipRemote = remotes and remotes:FindFirstChild("unequipItem")
+
         for idx, slotName in ipairs(slots) do
             local ab = sortedAbilities[idx]
             if ab and ab.num then
@@ -549,6 +563,16 @@ local function ProcessAutoEquip()
                     isAlreadyInSlot = (ab.equipped[slotName] == true)
                 end
                 if not isAlreadyInSlot then
+                    -- Nếu đang ở slot khác, unequip trước để tránh bị game chặn không cho gán slot mới
+                    if unequipRemote and type(ab.equipped) == "table" then
+                        for s, isEq in pairs(ab.equipped) do
+                            if isEq == true and s ~= slotName then
+                                pcall(function() unequipRemote:InvokeServer("ability", ab.num) end)
+                                task.wait(0.1)
+                                break
+                            end
+                        end
+                    end
                     pcall(function()
                         equipRemote:InvokeServer("ability", ab.num, slotName)
                     end)
@@ -560,12 +584,17 @@ local function ProcessAutoEquip()
 end
 
 --------------------------------------------------------------------------------
--- 8. SMART AUTO SELL (BÁN ĐỒ RÁC 100% BẰNG GAME REMOTE, BẢO VỆ ĐỒ HIẾM)
+-- 8. SMART AUTO SELL (BẢO VỆ TUYỆT ĐỐI ĐỒ ĐẦU GAME CHO NGƯỜI CHƠI)
 --------------------------------------------------------------------------------
 local lastSellCheck = 0
 local function ProcessAutoSell()
     if not Config.AutoSell then return end
     if not IsInLobby() then return end -- Chỉ bán đồ khi ở sảnh Lobby
+
+    -- CHỐNG MẤT ĐỒ ĐẦU GAME: Dưới cấp 25 tuyệt đối không bán bất cứ món nào!
+    local playerLvl = GetPlayerLevel()
+    if playerLvl < (Config.MinLevelToSell or 25) then return end
+
     if os.clock() - lastSellCheck < 5.0 then return end
     lastSellCheck = os.clock()
 
@@ -588,8 +617,9 @@ local function ProcessAutoSell()
     }
     local totalToSell = 0
 
-    local function CheckAndQueueSell(category, itemsTable)
+    local function CheckAndQueueSell(category, itemsTable, minKeepCount)
         if not itemsTable then return end
+        local unequippedItems = {}
         for key, item in pairs(itemsTable) do
             if type(item) == "table" then
                 local isEquipped = false
@@ -603,24 +633,31 @@ local function ProcessAutoSell()
 
                 local rarity = tostring(item.rarity or ""):lower()
                 local num = tonumber(item.uniqueItemNum) or tonumber(key:match("%d+"))
-
-                -- An toàn tuyệt đối: Không bán đồ đang đeo, chỉ bán nếu nằm trong danh sách SellRarities
                 local properRarity = rarity:gsub("^%l", string.upper)
+
                 if not isEquipped and num and Config.SellRarities[properRarity] == true then
-                    table.insert(sellPayload[category], num)
-                    totalToSell = totalToSell + 1
+                    table.insert(unequippedItems, num)
                 end
+            end
+        end
+
+        -- Chỉ bán nếu số lượng đồ dự trữ vượt quá mức an toàn minKeepCount
+        if #unequippedItems > (minKeepCount or 2) then
+            for i = 1, #unequippedItems - (minKeepCount or 2) do
+                table.insert(sellPayload[category], unequippedItems[i])
+                totalToSell = totalToSell + 1
             end
         end
     end
 
-    CheckAndQueueSell("weapon", invData.weapons)
-    CheckAndQueueSell("helmet", invData.helmets)
-    CheckAndQueueSell("chest", invData.chests)
-    CheckAndQueueSell("ability", invData.abilities)
+    -- Luôn giữ lại tối thiểu 3 vũ khí, 6 kỹ năng, 2 nón, 2 giáp trong kho
+    CheckAndQueueSell("weapon", invData.weapons, 3)
+    CheckAndQueueSell("helmet", invData.helmets, 2)
+    CheckAndQueueSell("chest", invData.chests, 2)
+    CheckAndQueueSell("ability", invData.abilities, 6)
 
     if totalToSell > 0 then
-        State.CurrentStatus = string.format("Bán %d món đồ rác qua remote...", totalToSell)
+        State.CurrentStatus = string.format("Bán %d món đồ trùng lặp dư thừa...", totalToSell)
         pcall(function()
             sellRemote:FireServer(sellPayload)
         end)
@@ -632,7 +669,19 @@ end
 -- 9. AUTO QUEUE & DUNGEON PROGRESSION (CHỌN MAP CAO NHẤT)
 --------------------------------------------------------------------------------
 local function ProcessLobbyProgression()
-    if not IsInLobby() then return end
+    if not IsInLobby() then
+        State.EquippedBeforeJoin = false
+        return
+    end
+
+    -- BẮT BUỘC: Kiểm tra & trang bị đầy đủ vũ khí, áo giáp, kỹ năng mạnh nhất TRƯỚC KHI tạo phòng hoặc vào map!
+    if not State.EquippedBeforeJoin then
+        State.CurrentStatus = "Trang bị kỹ năng & vũ khí trước khi vào map..."
+        pcall(ProcessAutoEquip)
+        pcall(ProcessAutoStats)
+        State.EquippedBeforeJoin = true
+        task.wait(0.5)
+    end
 
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
     local playerLvl = GetPlayerLevel()
@@ -1019,8 +1068,10 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent)
 
     -- 2. Kích hoạt kỹ năng Q và E qua GUI Button signals (100% không đụng tới chuột)
     local abilitiesGui = PlayerGui:FindFirstChild("abilities")
-    local leftBtn = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true) and abilitiesGui.LeftAbility:FindFirstChildWhichIsA("GuiButton", true)
-    local rightBtn = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true) and abilitiesGui.RightAbility:FindFirstChildWhichIsA("GuiButton", true)
+    local leftAbility = abilitiesGui and abilitiesGui:FindFirstChild("LeftAbility", true)
+    local rightAbility = abilitiesGui and abilitiesGui:FindFirstChild("RightAbility", true)
+    local leftBtn = leftAbility and leftAbility:FindFirstChildWhichIsA("GuiButton", true)
+    local rightBtn = rightAbility and rightAbility:FindFirstChildWhichIsA("GuiButton", true)
 
     if leftBtn then ClickButton(leftBtn) end
     if rightBtn then ClickButton(rightBtn) end
@@ -1034,8 +1085,10 @@ local function CastAllAbilities(isBoss, mobCount, healthPercent)
         end)
     end
 
-    -- 4. Nếu cả 2 chiêu đang hồi: Tự động đổi sang bộ kỹ năng thứ 2 để xả tiếp
-    if AreCurrentSkillsOnCooldown() then
+    -- 4. Nếu cả 2 chiêu đang hồi HOẶC game báo "Can swap": Tự động đổi sang bộ kỹ năng thứ 2 để xả tiếp
+    local canSwapLabel = abilitiesGui and abilitiesGui:FindFirstChild("CanSwap", true)
+    local canSwapReady = canSwapLabel and canSwapLabel.Visible and canSwapLabel.Text:lower():find("swap")
+    if AreCurrentSkillsOnCooldown() or canSwapReady then
         SwapAbilitySet()
     end
 end
@@ -1118,13 +1171,18 @@ local function ProcessSmartCombat()
     local pp = LocalPlayer:FindFirstChild("physicalPower") and LocalPlayer.physicalPower.Value or 0
     local isMage = (sp >= pp)
 
-    local idealRange = isMage and (Config.CombatRangeMage or 15) or (Config.CombatRangeWarrior or 6)
-    local minKiteDist = isMage and (Config.KiteDistanceMage or 10) or (Config.KiteDistanceWarrior or 4)
+    -- CỰ LY VÀNG NÉ 100% ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
+    -- Tầm đánh thường của quái cận chiến là ~5-6 studs.
+    -- Để không bao giờ bị trúng đòn thường:
+    -- Mage / Pháp sư: Cự ly an toàn tối thiểu là 14 studs, cự ly xả skill tối đa là 18 studs.
+    -- Warrior / Chiến binh: Cự ly an toàn tối thiểu là 7.5 studs, cự ly đánh là 9.5 studs.
+    local safeMinDist = isMage and (Config.KiteDistanceMage or 14) or (Config.KiteDistanceWarrior or 7.5)
+    local safeMaxDist = isMage and (Config.CombatRangeMage or 18) or (Config.CombatRangeWarrior or 9.5)
 
-    -- Khi máu thấp (< 35%): Tự động nới rộng cự ly kiting để bảo toàn mạng sống
-    if healthPercent < 0.35 then
-        idealRange = idealRange + 6
-        minKiteDist = minKiteDist + 6
+    -- Khi máu thấp (< 40%): Lùi thêm 5 studs an toàn để hồi phục
+    if healthPercent < 0.4 then
+        safeMinDist = safeMinDist + 5
+        safeMaxDist = safeMaxDist + 5
     end
 
     -- Hướng lùi ra xa quái vật (trên mặt phẳng ngang X-Z)
@@ -1162,50 +1220,64 @@ local function ProcessSmartCombat()
         end
     end
 
-    -- 3. DI CHUYỂN, TIẾP CẬN & ĐI LÙI THÔNG MINH
-    if dist > (idealRange + 3) then
-        -- A. Ở XA: Đi bộ tiến tới gần quái
-        State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
-        hum.AutoRotate = true
-
-        local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
-        if hasLOS then
-            hum:MoveTo(mobRoot.Position)
-        else
-            FollowWaypoints(mobRoot.Position)
-        end
-    elseif dist < minKiteDist then
-        -- B. QUÁ GẦN: ĐI LÙI THẬT THÔNG MINH (Kiting Backward + Né tường + Circle Strafe)
-        -- Tắt AutoRotate để nhân vật giữ nguyên hướng mặt nhìn quái và lùi bằng chân
+    -- 3. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH
+    if dist < safeMinDist then
+        -- A. QUÁ GẦN: ĐI LÙI NGAY LẬP TỨC ĐỂ NÉ ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
         hum.AutoRotate = false
 
-        local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 6)
-        local chosenMoveDir = nil
+        local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 7)
+        local chosenMoveTarget = nil
 
-        if backClear or backDist > 3.5 then
-            -- Phía sau thông thoáng: Đi lùi kết hợp strafe nhẹ tạo góc xả chiêu đẹp
-            local strafePart = (strafeSign > 0) and leftDir or rightDir
-            chosenMoveDir = (awayDir * 0.8 + strafePart * 0.35).Unit
-            State.CurrentStatus = string.format("🔄 Đi lùi thông minh (Kite) vừa xả đòn: %s", targetMob.Name)
+        if backClear or backDist > 4.0 then
+            -- Phía sau thông thoáng: Lùi dứt khoát 10 studs
+            chosenMoveTarget = root.Position + awayDir * 10
+            State.CurrentStatus = string.format("🔄 Đi lùi né đòn đánh thường của %s (Cách: %dm)", targetMob.Name, math.floor(dist))
+            -- Nhảy lùi khẩn cấp nếu quái quá gần (< 8 studs) đang chuẩn bị vung tay
+            if dist < 8 then
+                hum.Jump = true
+            end
         else
             -- Phía sau vướng tường/cột: Circle-Strafe né sang bên thoáng nhất
             local leftClear, leftDist = CheckDirectionClear(root.Position, leftDir, 5)
             local rightClear, rightDist = CheckDirectionClear(root.Position, rightDir, 5)
-            chosenMoveDir = (leftDist >= rightDist) and leftDir or rightDir
+            local chosenDir = (leftDist >= rightDist) and leftDir or rightDir
+            chosenMoveTarget = root.Position + chosenDir * 8
             State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe): %s", targetMob.Name)
         end
 
-        hum:MoveTo(root.Position + chosenMoveDir * 6)
-    else
-        -- C. CỰ LY VÀNG (Sweet Spot): Giữ khoảng cách hoàn hảo & đảo bước chân nhẹ
+        hum:MoveTo(chosenMoveTarget)
+
+    elseif dist <= safeMaxDist then
+        -- B. CỰ LY VÀNG (14 - 18 studs): Vừa xa tầm đánh của quái vừa trúng tầm skill!
+        -- Vì quái luôn chạy đuổi theo nhân vật, nhân vật VỪA LÙI VỪA STRAFE để duy trì khoảng cách!
         hum.AutoRotate = false
-        local strafeDir = (strafeSign > 0) and leftDir or rightDir
-        State.CurrentStatus = string.format("⚔️ Giữ cự ly vàng & xả đòn: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
-        hum:MoveTo(root.Position + strafeDir * 3)
+        local strafePart = (strafeSign > 0) and leftDir or rightDir
+        local maintainDir = (awayDir * 0.7 + strafePart * 0.4).Unit
+
+        State.CurrentStatus = string.format("⚔️ Giữ cự ly vàng & xả skill: %s (HP: %d/%d)", targetMob.Name, enemyHp, enemyMaxHp)
+        hum:MoveTo(root.Position + maintainDir * 5)
+
+    else
+        -- C. Ở XA: Tiếp cận quái
+        if dist <= 25 then
+            -- Trong cự ly gần: Bước tới nhẹ
+            hum.AutoRotate = true
+            hum:MoveTo(root.Position - awayDir * 5)
+        else
+            -- Ở xa hẳn: Tiếp cận bằng đường thẳng hoặc NavMesh Waypoints nếu có vật cản
+            State.CurrentStatus = string.format("🏃 Tiếp cận %s (Cách: %dm | HP: %d/%d)", targetMob.Name, math.floor(dist), enemyHp, enemyMaxHp)
+            hum.AutoRotate = true
+            local hasLOS = HasLineOfSight(root.Position, mobRoot.Position, {char, targetMob})
+            if hasLOS then
+                hum:MoveTo(mobRoot.Position)
+            else
+                FollowWaypoints(mobRoot.Position)
+            end
+        end
     end
 
-    -- 4. ĐÁNH THƯỜNG VỚI VŨ KHÍ (Khi trong tầm đánh)
-    local attackMaxDist = isMage and (idealRange + 8) or 8
+    -- 4. ĐÁNH THƯỜNG VỚI VŨ KHÍ (Khi trong tầm đánh 25 studs cho Wand)
+    local attackMaxDist = isMage and 25 or 9
     if dist <= attackMaxDist then
         AttackWithWeapon(mobRoot.Position)
     end
