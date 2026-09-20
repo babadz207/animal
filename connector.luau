@@ -61,9 +61,16 @@ end
 --// Functions \\--
 local getscriptbytecode = getscriptbytecode or function(_) error("Unable to get script bytecode.") end
 local GetScriptHash = type(getscripthash) == "function" and getscripthash or nil
-local BuiltInDecompile = type(decompile) == "function" and decompile or nil
-
-local LuaEncode = loadstring(game:HttpGet("https://raw.githubusercontent.com/chadhyatt/LuaEncode/refs/heads/master/src/LuaEncode.lua"))()
+local LuaEncode
+pcall(function()
+    LuaEncode = loadstring(game:HttpGet("https://raw.githubusercontent.com/chadhyatt/LuaEncode/refs/heads/master/src/LuaEncode.lua"))()
+end)
+if type(LuaEncode) ~= "function" then
+    LuaEncode = function(tbl)
+        local ok, res = pcall(function() return HttpService:JSONEncode(tbl) end)
+        return ok and res or tostring(tbl)
+    end
+end
 
 --// Bounded serialization: cap depth / entries / string length and render
 --// Instances as their path so structured tool responses can't flood the
@@ -1263,15 +1270,19 @@ end
 
 --// Main Loop \\--
 while true do
+    print("[Roblox-MCP] Đang kết nối tới MCP Server...")
     local success, Bridge = pcall(CreateBridge)
     
-    if not success then
+    if not success or not Bridge then
+        warn("[Roblox-MCP] ❌ Không thể tạo Bridge: " .. tostring(Bridge))
         task.wait(3)
         continue
     end
 
+    print("[Roblox-MCP] Đang chờ server cấp Client ID...")
     local clientId = WaitForBridgeClientId(Bridge)
     if clientId then
+        print("[Roblox-MCP] ✅ ĐÃ KẾT NỐI VÀ ĐĂNG KÝ THÀNH CÔNG! Client ID: " .. tostring(clientId))
         ActiveBridge = Bridge
         StartUploadQueue()
 

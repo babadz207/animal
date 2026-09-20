@@ -8,11 +8,17 @@ getgenv().MCP_Loaded = nil
 getgenv().MCP_ForceReload = true
 
 -- Preferred bridge address
-getgenv().BridgeURL = getgenv().BridgeURL or "127.0.0.1:16384"
+getgenv().BridgeURL = getgenv().BridgeURL or "10.0.2.2:16384"
 
-print("[Roblox-MCP] Đang tải connector từ GitHub...")
+local hasWs = (type(WebSocket) == "table" or type(websocket) == "table" or (syn and type(syn.websocket) == "table"))
+local hasReq = (type(request) == "function" or type(http_request) == "function" or (syn and type(syn.request) == "function"))
+local execName = (identifyexecutor and identifyexecutor()) or (getexecutorname and getexecutorname()) or "Unknown"
+
+print(string.format("[Roblox-MCP] Executor: %s | WebSocket: %s | Request: %s", tostring(execName), tostring(hasWs), tostring(hasReq)))
+
+print("[Roblox-MCP] Đang tải connector mới nhất từ GitHub...")
 local success, connectorCode = pcall(function()
-    return game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/connector.luau")
+    return game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/connector.luau?nocache=" .. tostring(os.time()))
 end)
 
 if success and connectorCode then
