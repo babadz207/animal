@@ -1968,8 +1968,8 @@ local function ProcessSmartCombat()
     end
 
     -- Khi trong phạm vi giao chiến và có tầm nhìn trực tiếp: Xoay mặt nhìn thẳng vào quái vật
-    -- (Tuyệt đối KHÔNG ép CFrame khi đang di chuyển tìm đường quanh góc tường)
-    if isTargetVis and dist <= safeMaxDist then
+    -- (Chỉ ép CFrame khi đứng yên xả đòn; khi đang di chuyển lùi/né thì để Humanoid tự xoay chạy hết tốc độ)
+    if isTargetVis and dist <= safeMaxDist and hum.MoveDirection.Magnitude < 0.1 then
         local lookAtTarget = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
         local toMob = (lookAtTarget - root.Position)
         if toMob.Magnitude > 0.1 then
