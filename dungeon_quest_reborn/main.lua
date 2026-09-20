@@ -883,7 +883,43 @@ local function ProcessSmartCombat()
 end
 
 --------------------------------------------------------------------------------
--- 11. AUTO REPLAY & REWARD CLAIM
+-- 11. AUTO START & READY IN DUNGEON
+--------------------------------------------------------------------------------
+local function ProcessDungeonReady()
+    if IsInLobby() then return end
+
+    local dungStarted = workspace:FindFirstChild("dungeonStarted") and workspace.dungeonStarted.Value
+    if dungStarted == true then return end -- Trận đấu đã bắt đầu, không cần ready nữa
+
+    -- 1. Kích hoạt Remote readyUp hoặc startDungeon nếu có
+    local remotes = ReplicatedStorage:FindFirstChild("remotes")
+    if remotes then
+        if remotes:FindFirstChild("readyUp") then
+            pcall(function() remotes.readyUp:FireServer() end)
+        end
+        if remotes:FindFirstChild("startDungeon") then
+            pcall(function() remotes.startDungeon:FireServer() end)
+        end
+    end
+
+    -- 2. Tìm và bấm nút Ready / Start trên màn hình nếu có
+    for _, gui in pairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "KaitunDashboard" then
+            for _, desc in pairs(gui:GetDescendants()) do
+                if desc:IsA("GuiButton") and desc.Visible then
+                    local name = desc.Name:lower()
+                    local text = (desc:IsA("TextButton") and desc.Text:lower()) or ""
+                    if name:find("ready") or name:find("start") or text:find("ready") or text:find("start") then
+                        ClickButton(desc)
+                    end
+                end
+            end
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- 12. AUTO REPLAY & REWARD CLAIM (CHỈ REPLAY KHI KẾT THÚC TRẬN ĐẤU)
 --------------------------------------------------------------------------------
 local function ProcessAutoReplay()
     if not Config.AutoReplay then return end
@@ -892,38 +928,30 @@ local function ProcessAutoReplay()
     if IsInLobby() then return end
 
     -- Nút Replay trên màn hình khi kết thúc trận
+    -- (Trong Dungeon Quest, ReplayDungeonButton CHỈ BẬT khi trận đấu kết thúc)
     local replayGui = PlayerGui:FindFirstChild("ReplayDungeonButton")
     if replayGui and replayGui.Enabled then
-        local replayBtn = replayGui:FindFirstChild("Replay") or replayGui:FindFirstChildWhichIsA("GuiButton", true)
+        local replayBtn = replayGui:FindFirstChild("Replay", true) or replayGui:FindFirstChildWhichIsA("GuiButton", true)
         if replayBtn and replayBtn.Visible then
-            State.CurrentStatus = "Chiến thắng! Đang bấm Replay..."
+            State.CurrentStatus = "Chiến thắng / Hết trận! Đang bấm Replay..."
             QueueReconnect()
             ClickButton(replayBtn)
             State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-            task.wait(1.5)
+            task.wait(2)
             return
         end
     end
 
-    -- Remote Replay - Chỉ khi đang trong trận và bảng nhận thưởng kết thúc trận xuất hiện
-    local remotes = ReplicatedStorage:FindFirstChild("remotes")
-    if remotes and remotes:FindFirstChild("replayDungeon") then
-        local rewardHolder = PlayerGui:FindFirstChild("rewardGuiHolder")
-        if rewardHolder and rewardHolder.Enabled then
-            local hasRewardVisible = false
-            for _, child in pairs(rewardHolder:GetChildren()) do
-                if child:IsA("GuiObject") and child.Visible then
-                    hasRewardVisible = true
-                    break
-                end
-            end
-            if hasRewardVisible then
-                State.CurrentStatus = "Nhận thưởng & Tự động Replay..."
-                QueueReconnect()
-                pcall(function() remotes.replayDungeon:FireServer() end)
-                State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-                task.wait(1.5)
-            end
+    -- Chỉ gọi Remote replayDungeon nếu game xác nhận hoàn thành (dungeonComplete)
+    local dungeonComplete = workspace:FindFirstChild("dungeonComplete") and workspace.dungeonComplete.Value
+    if dungeonComplete == true then
+        local remotes = ReplicatedStorage:FindFirstChild("remotes")
+        if remotes and remotes:FindFirstChild("replayDungeon") then
+            State.CurrentStatus = "Dungeon hoàn thành! Tự động Replay..."
+            QueueReconnect()
+            pcall(function() remotes.replayDungeon:FireServer() end)
+            State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
+            task.wait(2)
         end
     end
 end
@@ -1072,6 +1100,7 @@ local function Main()
             pcall(ProcessAutoEquip)
             pcall(ProcessAutoSell)
             pcall(ProcessLobbyProgression)
+            pcall(ProcessDungeonReady)
             pcall(ProcessSmartCombat)
             pcall(ProcessAutoReplay)
         end
