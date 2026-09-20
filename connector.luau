@@ -1,13 +1,18 @@
 --// Variables \\--
-if getgenv().MCP_Loaded == true then
+if getgenv().MCP_Loaded == true and not getgenv().MCP_ForceReload then
+    print("[Roblox-MCP] Already loaded in this session. Set getgenv().MCP_ForceReload = true to force reconnect.")
     return
 end
 
 getgenv().MCP_Loaded = true
 
-local BridgeURL = getgenv().BridgeURL or getgenv().bridgeurl or ... or "localhost:16384"
+local request = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request)
+
+local BridgeURL = getgenv().BridgeURL or getgenv().bridgeurl or ... or "127.0.0.1:16384"
 getgenv().BridgeURL = BridgeURL
 getgenv().bridgeurl = BridgeURL
+
+print("[Roblox-MCP] Initializing connector to " .. tostring(BridgeURL) .. " ...")
 
 --// Wait for game to load \\--
 if not game:IsLoaded() then
