@@ -1726,14 +1726,22 @@ local function ProcessSmartCombat()
         lastPlayerMoveTime = now
     end
 
+    -- Khi trong phạm vi giao chiến: Luôn xoay mặt và cơ thể nhìn thẳng vào quái vật
+    -- (Tuyệt đối không quay lưng lại quái hay đâm mặt vào tường)
+    local lookAtTarget = Vector3.new(mobRoot.Position.X, root.Position.Y, mobRoot.Position.Z)
+    local toMob = (lookAtTarget - root.Position)
+    if toMob.Magnitude > 0.1 then
+        root.CFrame = CFrame.lookAt(root.Position, lookAtTarget)
+    end
+
     -- 4. DI CHUYỂN, TIẾP CẬN & ĐI LÙI NÉ ĐÒN ĐÁNH THƯỜNG THÔNG MINH THEO CỰ LI CHIÊU
     if dist < safeMinDist then
         -- A. QUÁ GẦN: ĐI LÙI DỨT KHOÁT ĐỂ NÉ ĐÒN ĐÁNH THƯỜNG CỦA QUÁI
-        local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 7)
+        local backClear, backDist = CheckDirectionClear(root.Position, awayDir, 6)
         local chosenMoveTarget = nil
 
-        if backClear or backDist > 4.0 then
-            local backStep = combatProfile.isRanged and 10 or 6
+        if backClear or backDist > 3.5 then
+            local backStep = math.min(combatProfile.isRanged and 8 or 5, math.max(2, backDist - 1.5))
             chosenMoveTarget = root.Position + awayDir * backStep
             State.CurrentStatus = string.format("🔄 Đi lùi né đánh thường [%s] (Cách: %.1fm)", activeSkillInfo, dist)
             -- Nhảy lùi khẩn cấp chỉ khi quái áp sát nguy hiểm (có debounce 0.8s chống nhảy giật liên tục)
@@ -1745,26 +1753,68 @@ local function ProcessSmartCombat()
             -- Phía sau vướng tường/cột: Circle-Strafe né sang bên thoáng nhất
             local leftClear, leftDist = CheckDirectionClear(root.Position, leftDir, 5)
             local rightClear, rightDist = CheckDirectionClear(root.Position, rightDir, 5)
-            local chosenDir = (leftDist >= rightDist) and leftDir or rightDir
-            chosenMoveTarget = root.Position + chosenDir * 7
-            State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe) [%s]", activeSkillInfo)
+            if leftDist >= 3.0 or rightDist >= 3.0 then
+                local chosenDir = (leftDist >= rightDist) and leftDir or rightDir
+                local sideStep = math.min(5, math.max(2, math.max(leftDist, rightDist) - 1.5))
+                chosenMoveTarget = root.Position + chosenDir * sideStep
+                State.CurrentStatus = string.format("🔄 Lùi né tường (Circle Strafe) [%s]", activeSkillInfo)
+            else
+                -- Bị dồn sát góc tường: Tuyệt đối KHÔNG đâm đầu vào tường! Đứng yên đối mặt quái và chém trả
+                chosenMoveTarget = nil
+                State.CurrentStatus = string.format("🛡️ Đứng vững đánh trả quái (Lưng tựa tường) [%s]", activeSkillInfo)
+            end
         end
 
-        SmoothMoveTo(hum, chosenMoveTarget, true)
+        if chosenMoveTarget then
+            SmoothMoveTo(hum, chosenMoveTarget, true)
+        end
 
     elseif dist <= safeMaxDist then
         -- B. CỰ LY VÀNG: Vừa xa tầm đánh của quái vừa trúng tầm skill!
         local strafePart = (strafeSign > 0) and leftDir or rightDir
-        local maintainDir = (awayDir * 0.6 + strafePart * 0.4).Unit
-        local goldenTarget = root.Position + maintainDir * 5
+        local maintainDir = (awayDir * 0.5 + strafePart * 0.5).Unit
 
-        State.CurrentStatus = string.format("⚔️ Cự ly vàng [%s] (Cách: %.1fm | Quái HP: %d/%d)", activeSkillInfo, dist, enemyHp, enemyMaxHp)
-        SmoothMoveTo(hum, goldenTarget, false)
+        -- Kiểm tra xem hướng duy trì cự ly vàng có bị vướng tường không
+        local dirClear, dirDist = CheckDirectionClear(root.Position, maintainDir, 4)
+        local goldenTarget = nil
+
+        if dirClear or dirDist > 3.0 then
+            local step = math.min(4, math.max(1.5, dirDist - 1.5))
+            goldenTarget = root.Position + maintainDir * step
+            State.CurrentStatus = string.format("⚔️ Cự ly vàng [%s] (Cách: %.1fm | Quái HP: %d/%d)", activeSkillInfo, dist, enemyHp, enemyMaxHp)
+        else
+            -- Hướng maintain bị tường cản -> Thử strafe sang hướng ngược lại
+            local altStrafe = -strafePart
+            local altClear, altDist = CheckDirectionClear(root.Position, altStrafe, 4)
+            if altClear or altDist > 3.0 then
+                strafeSign = -strafeSign -- Đảo hướng strafe
+                local step = math.min(4, math.max(1.5, altDist - 1.5))
+                goldenTarget = root.Position + altStrafe * step
+                State.CurrentStatus = string.format("⚔️ Đổi hướng né tường [%s]", activeSkillInfo)
+            else
+                -- Không còn khoảng trống: Đứng yên đối mặt quái xả skill
+                goldenTarget = nil
+                State.CurrentStatus = string.format("⚔️ Cự ly vàng (Đứng vững vị trí) [%s]", activeSkillInfo)
+            end
+        end
+
+        if goldenTarget then
+            SmoothMoveTo(hum, goldenTarget, false)
+        end
 
     else
         -- C. Ở XA: Tiếp cận quái trong tầm nhìn trực tiếp
         State.CurrentStatus = string.format("🏃 Tiếp cận %s [%s] (Cách: %dm | HP: %d/%d)", targetMob.Name, activeSkillInfo, math.floor(dist), enemyHp, enemyMaxHp)
         SmoothMoveTo(hum, mobRoot.Position, false)
+    end
+
+    -- Chống kẹt va chạm trực diện: Nếu phát hiện có tường/cột ngay sát trước mặt (< 2.0 studs)
+    local frontClear, frontDist = CheckDirectionClear(root.Position, root.CFrame.LookVector, 2.2)
+    if not frontClear and frontDist < 1.8 then
+        local leftClear, leftDist = CheckDirectionClear(root.Position, leftDir, 3.5)
+        local rightClear, rightDist = CheckDirectionClear(root.Position, rightDir, 3.5)
+        local dodgeDir = (leftDist >= rightDist) and leftDir or rightDir
+        hum:MoveTo(root.Position + dodgeDir * 3)
     end
 
     -- 5. ĐÁNH THƯỜNG VỚI VŨ KHÍ
