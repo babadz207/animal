@@ -6,4 +6,4 @@
     ========================================================================
 --]]
 
-return loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_reborn/main.lua"))()
+return loadstring(game:HttpGet("https://raw.githubusercontent.com/babadz207/animal/main/dungeon_quest_reborn/main.lua?t=" .. tick()))()
