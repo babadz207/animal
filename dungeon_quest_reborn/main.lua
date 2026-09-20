@@ -22,9 +22,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local PathfindingService = game:GetService("PathfindingService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
@@ -163,13 +165,84 @@ local State = {
 --------------------------------------------------------------------------------
 local function ClickButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
+    local clicked = false
+
+    -- 1. firesignal nếu có hỗ trợ
     if typeof(firesignal) == "function" then
         for _, sig in ipairs({"MouseButton1Down", "MouseButton1Up", "MouseButton1Click", "Activated"}) do
-            pcall(function() firesignal(btn[sig]) end)
+            pcall(function()
+                firesignal(btn[sig])
+                clicked = true
+            end)
         end
-        return true
     end
-    return false
+
+    -- 2. VirtualInputManager (Click vật lý theo tọa độ chuẩn xác trên màn hình)
+    pcall(function()
+        local pos = btn.AbsolutePosition
+        local size = btn.AbsoluteSize
+        local cx = pos.X + size.X / 2
+        local cy = pos.Y + size.Y / 2
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+        task.wait(0.04)
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+        clicked = true
+    end)
+
+    -- 3. VirtualUser fallback
+    if not clicked then
+        pcall(function()
+            local pos = btn.AbsolutePosition
+            local size = btn.AbsoluteSize
+            local cx = pos.X + size.X / 2
+            local cy = pos.Y + size.Y / 2
+            VirtualUser:Button1Down(Vector2.new(cx, cy))
+            task.wait(0.04)
+            VirtualUser:Button1Up(Vector2.new(cx, cy))
+            clicked = true
+        end)
+    end
+
+    return clicked
+end
+
+local function GetPlayButton()
+    -- 1. Thử đường dẫn mặc định của Dungeon Quest
+    local mainInterface = PlayerGui:FindFirstChild("mainInterface")
+    if mainInterface then
+        local btn = mainInterface:FindFirstChild("playButton", true)
+        if btn and btn:IsA("GuiButton") and btn.Visible then return btn end
+    end
+
+    -- 2. Quét mọi ScreenGui tìm nút Play
+    for _, gui in pairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "KaitunDashboard" then
+            for _, desc in pairs(gui:GetDescendants()) do
+                if desc:IsA("GuiButton") and desc.Visible then
+                    local name = desc.Name:lower()
+                    if name == "playbutton" or name == "play" then
+                        return desc
+                    end
+                    if desc:IsA("TextButton") and desc.Text:lower():find("play") then
+                        return desc
+                    end
+                    local txt = desc:FindFirstChildOfClass("TextLabel")
+                    if txt and txt.Text:lower():find("play") then
+                        return desc
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function IsInLobby()
+    return workspace:FindFirstChild("Lobby") ~= nil
+end
+
+local function IsInDungeon()
+    return not IsInLobby()
 end
 
 local function GetRootPart()
@@ -369,89 +442,118 @@ end
 -- 9. AUTO QUEUE & DUNGEON PROGRESSION (CHỌN MAP CAO NHẤT)
 --------------------------------------------------------------------------------
 local function ProcessLobbyProgression()
-    local inLobby = workspace:FindFirstChild("Lobby") ~= nil
-    local inGameVal = LocalPlayer:FindFirstChild("inGame") and LocalPlayer.inGame.Value
-    local dungeonStarted = workspace:FindFirstChild("dungeonStarted") and workspace.dungeonStarted.Value
-
-    if not inLobby or inGameVal or dungeonStarted then return end
+    if not IsInLobby() then return end
 
     -- Xác định Dungeon thích hợp
     local playerLvl = GetPlayerLevel()
     local targetDungeon = Config.AutoProgressionDungeon and GetBestDungeonForLevel(playerLvl) or Config.FixedDungeon
     State.DungeonTarget = targetDungeon
 
-    local queueGui = PlayerGui:FindFirstChild("queueGui")
-    local mainInterface = PlayerGui:FindFirstChild("mainInterface")
-
-    -- Mở menu Dungeon
-    local playBtn = mainInterface and mainInterface:FindFirstChild("buttons") and mainInterface.buttons:FindFirstChild("playButton")
-    if playBtn and (not queueGui or not queueGui.Enabled) then
-        State.CurrentStatus = "Mở danh sách Dungeon..."
-        ClickButton(playBtn)
-        task.wait(0.6)
+    -- Tìm queueGui (có thể là ScreenGui hoặc Frame)
+    local queueGui = PlayerGui:FindFirstChild("queueGui", true) or PlayerGui:FindFirstChild("queueGui")
+    local isQueueOpen = false
+    if queueGui then
+        if queueGui:IsA("ScreenGui") then
+            isQueueOpen = queueGui.Enabled
+        elseif queueGui:IsA("GuiObject") then
+            isQueueOpen = queueGui.Visible
+        end
     end
 
-    if queueGui and queueGui.Enabled then
-        -- Chọn Create Game
-        local selectOption = queueGui:FindFirstChild("selectOption")
+    -- Nếu queueGui chưa mở, bấm nút Play để mở danh sách phòng
+    if not isQueueOpen then
+        local playBtn = GetPlayButton()
+        if playBtn then
+            State.CurrentStatus = "Mở menu Dungeon..."
+            ClickButton(playBtn)
+            task.wait(0.6)
+            return
+        end
+    end
+
+    -- Khi queueGui đã mở:
+    if queueGui then
+        -- 1. Nếu đang ở màn hình chọn chế độ Create Game:
+        local selectOption = queueGui:FindFirstChild("selectOption", true)
         if selectOption and selectOption.Visible then
-            local createBtn = selectOption:FindFirstChild("Frame") and selectOption.Frame:FindFirstChild("createGame")
+            local createBtn = selectOption:FindFirstChild("createGame", true) or selectOption:FindFirstChild("CreateGame", true)
             if createBtn then
-                State.CurrentStatus = "Tạo phòng Dungeon..."
-                ClickButton(createBtn)
-                task.wait(0.6)
+                local btn = createBtn:IsA("GuiButton") and createBtn or createBtn:FindFirstChildWhichIsA("GuiButton", true)
+                if btn then
+                    State.CurrentStatus = "Tạo phòng Dungeon..."
+                    ClickButton(btn)
+                    task.wait(0.6)
+                    return
+                end
             end
         end
 
-        -- Chọn Map Dungeon, Độ khó và Tạo Party
-        local choose = queueGui:FindFirstChild("chooseDungeon")
+        -- 2. Nếu đang ở màn hình chọn Map & Độ khó (chooseDungeon):
+        local choose = queueGui:FindFirstChild("chooseDungeon", true)
         if choose and choose.Visible then
             State.CurrentStatus = string.format("Chọn Map: %s (Cấp %d+)", targetDungeon, playerLvl)
 
             -- Chọn Dungeon trong ScrollingFrame
-            local scroll = choose:FindFirstChild("backgroundFillLeft") and choose.backgroundFillLeft:FindFirstChild("ScrollingFrame")
-            local dungBtn = scroll and scroll:FindFirstChild(targetDungeon) and scroll[targetDungeon]:FindFirstChild("TextButton")
-            if dungBtn then
-                ClickButton(dungBtn)
-                task.wait(0.2)
+            local scroll = choose:FindFirstChild("ScrollingFrame", true)
+            if scroll then
+                local dungBtn = scroll:FindFirstChild(targetDungeon)
+                if dungBtn then
+                    local targetBtn = dungBtn:IsA("GuiButton") and dungBtn or dungBtn:FindFirstChildWhichIsA("GuiButton", true)
+                    if targetBtn then
+                        ClickButton(targetBtn)
+                        task.wait(0.2)
+                    end
+                end
             end
 
-            -- Chọn Độ khó
-            local right = choose:FindFirstChild("backgroundFillRight")
-            local diffBtn = right and right:FindFirstChild(Config.Difficulty) and right[Config.Difficulty]:FindFirstChild("TextButton")
-            if diffBtn then
-                ClickButton(diffBtn)
-                task.wait(0.2)
+            -- Chọn Độ khó (Difficulty)
+            local diffContainer = choose:FindFirstChild("backgroundFillRight", true) or choose
+            local diffObj = diffContainer:FindFirstChild(Config.Difficulty)
+            if diffObj then
+                local diffBtn = diffObj:IsA("GuiButton") and diffObj or diffObj:FindFirstChildWhichIsA("GuiButton", true)
+                if diffBtn then
+                    ClickButton(diffBtn)
+                    task.wait(0.2)
+                end
             end
 
-            -- Bật Private Lobby
+            -- Bật Private Lobby nếu cấu hình
             if Config.PrivateLobby then
-                local privBtn = choose:FindFirstChild("private") and choose.private:FindFirstChild("Frame") and choose.private.Frame:FindFirstChild("button")
+                local privBtn = choose:FindFirstChild("private", true)
                 if privBtn then
-                    ClickButton(privBtn)
-                    task.wait(0.1)
+                    local toggle = privBtn:IsA("GuiButton") and privBtn or privBtn:FindFirstChildWhichIsA("GuiButton", true)
+                    if toggle then
+                        ClickButton(toggle)
+                        task.wait(0.1)
+                    end
                 end
             end
 
             -- Bấm Tạo Party (StartMain)
-            local startMain = choose:FindFirstChild("backgroundFillMiddle") and choose.backgroundFillMiddle:FindFirstChild("startMain") and choose.backgroundFillMiddle.startMain:FindFirstChild("TextButton")
+            local startMain = choose:FindFirstChild("startMain", true) or choose:FindFirstChild("StartMain", true)
             if startMain then
-                ClickButton(startMain)
-                task.wait(0.8)
+                local partyBtn = startMain:IsA("GuiButton") and startMain or startMain:FindFirstChildWhichIsA("GuiButton", true)
+                if partyBtn then
+                    ClickButton(partyBtn)
+                    task.wait(0.8)
+                    return
+                end
             end
         end
 
-        -- Bấm Start để vào trận
-        local lobbyInfo = queueGui:FindFirstChild("lobbyInfo")
+        -- 3. Nếu đang ở màn hình phòng chờ xuất phát (lobbyInfo):
+        local lobbyInfo = queueGui:FindFirstChild("lobbyInfo", true)
         if lobbyInfo and lobbyInfo.Visible then
-            local startBtn = lobbyInfo:FindFirstChild("startBackground") 
-                and lobbyInfo.startBackground:FindFirstChild("startFrame") 
-                and lobbyInfo.startBackground.startFrame:FindFirstChild("startButton")
-            if startBtn and startBtn.Visible then
-                State.CurrentStatus = "Bắt đầu vào trận: " .. targetDungeon .. "..."
-                QueueReconnect()
-                ClickButton(startBtn)
-                task.wait(1.5)
+            local startBtn = lobbyInfo:FindFirstChild("startButton", true) or lobbyInfo:FindFirstChild("StartButton", true)
+            if startBtn then
+                local launchBtn = startBtn:IsA("GuiButton") and startBtn or startBtn:FindFirstChildWhichIsA("GuiButton", true)
+                if launchBtn and launchBtn.Visible then
+                    State.CurrentStatus = "Bắt đầu vào trận: " .. targetDungeon .. "..."
+                    QueueReconnect()
+                    ClickButton(launchBtn)
+                    task.wait(1.5)
+                    return
+                end
             end
         end
     end
@@ -614,6 +716,7 @@ end
 
 local function ProcessSmartCombat()
     if not Config.KillAura then return end
+    if IsInLobby() then return end
 
     local enemiesFolder = workspace:FindFirstChild("enemies")
     if not enemiesFolder or #enemiesFolder:GetChildren() == 0 then return end
@@ -727,29 +830,42 @@ end
 local function ProcessAutoReplay()
     if not Config.AutoReplay then return end
 
-    -- Nút Replay trên màn hình
+    -- Tuyệt đối KHÔNG chạy AutoReplay khi đang ở Lobby!
+    if IsInLobby() then return end
+
+    -- Nút Replay trên màn hình khi kết thúc trận
     local replayGui = PlayerGui:FindFirstChild("ReplayDungeonButton")
     if replayGui and replayGui.Enabled then
-        local replayBtn = replayGui:FindFirstChild("Replay")
+        local replayBtn = replayGui:FindFirstChild("Replay") or replayGui:FindFirstChildWhichIsA("GuiButton", true)
         if replayBtn and replayBtn.Visible then
             State.CurrentStatus = "Chiến thắng! Đang bấm Replay..."
             QueueReconnect()
             ClickButton(replayBtn)
             State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-            task.wait(1)
+            task.wait(1.5)
+            return
         end
     end
 
-    -- Remote Replay
+    -- Remote Replay - Chỉ khi đang trong trận và bảng nhận thưởng kết thúc trận xuất hiện
     local remotes = ReplicatedStorage:FindFirstChild("remotes")
     if remotes and remotes:FindFirstChild("replayDungeon") then
         local rewardHolder = PlayerGui:FindFirstChild("rewardGuiHolder")
-        if rewardHolder and #rewardHolder:GetChildren() > 0 then
-            State.CurrentStatus = "Nhận thưởng & Tự động Replay..."
-            QueueReconnect()
-            pcall(function() remotes.replayDungeon:FireServer() end)
-            State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
-            task.wait(1)
+        if rewardHolder and rewardHolder.Enabled then
+            local hasRewardVisible = false
+            for _, child in pairs(rewardHolder:GetChildren()) do
+                if child:IsA("GuiObject") and child.Visible then
+                    hasRewardVisible = true
+                    break
+                end
+            end
+            if hasRewardVisible then
+                State.CurrentStatus = "Nhận thưởng & Tự động Replay..."
+                QueueReconnect()
+                pcall(function() remotes.replayDungeon:FireServer() end)
+                State.TotalDungeonsCompleted = State.TotalDungeonsCompleted + 1
+                task.wait(1.5)
+            end
         end
     end
 end
@@ -862,7 +978,7 @@ local function CreateDashboard()
         while task.wait(0.3) do
             if not frame or not frame.Parent then break end
             local playerLvl = GetPlayerLevel()
-            local inDung = workspace:FindFirstChild("dungeonStarted") and workspace.dungeonStarted.Value
+            local inDung = IsInDungeon()
 
             statusLbl.Text = "📌 " .. tostring(State.CurrentStatus)
             mapLbl.Text = "🏰 Map: " .. tostring(State.DungeonTarget) .. " (" .. Config.Difficulty .. ")"
