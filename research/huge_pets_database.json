@@ -1,0 +1,30 @@
+{
+  "summary": {
+    "total_huge_types_in_game": 1041,
+    "total_huge_pets_owned": 54,
+    "unique_huge_types_owned": 14,
+    "unowned_huge_types": 1027
+  },
+  "owned_huge_pets": [
+    {"id": "Huge Stingray", "type": "Normal", "shiny": true, "count": 2},
+    {"id": "Huge Stingray", "type": "Normal", "shiny": false, "count": 12},
+    {"id": "Huge Stingray", "type": "Golden", "shiny": false, "count": 1},
+    {"id": "Huge Stingray", "type": "Rainbow", "shiny": false, "count": 1},
+    {"id": "Huge Mining Monkey", "type": "Golden", "shiny": false, "count": 14},
+    {"id": "Huge Mining Monkey", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Jersey Seal", "type": "Normal", "shiny": false, "count": 6},
+    {"id": "Huge Jersey Seal", "type": "Golden", "shiny": false, "count": 1},
+    {"id": "Huge Steppe Wolf", "type": "Normal", "shiny": false, "count": 2},
+    {"id": "Huge Steppe Wolf", "type": "Rainbow", "shiny": false, "count": 1},
+    {"id": "Huge Garlic Chick", "type": "Normal", "shiny": false, "count": 2},
+    {"id": "Huge Horus Falcon", "type": "Normal", "shiny": false, "count": 2},
+    {"id": "Huge Wisp Griffin", "type": "Normal", "shiny": false, "count": 2},
+    {"id": "Huge Snow Crab", "type": "Normal", "shiny": false, "count": 2},
+    {"id": "Huge Anubis", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Oracle Tiger", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Nebula Lion", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Tomato Turtle", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Referee Zebra", "type": "Normal", "shiny": false, "count": 1},
+    {"id": "Huge Pixel Griffin", "type": "Normal", "shiny": false, "count": 1}
+  ]
+}

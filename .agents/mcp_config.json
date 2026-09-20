@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "roblox-executor-mcp": {
+      "command": "node",
+      "args": [
+        "D:/chit/mcp/roblox-executor-mcp-main/roblox-executor-mcp-main/dist/index.js"
+      ]
+    }
+  }
+}
