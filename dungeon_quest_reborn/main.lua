@@ -299,26 +299,35 @@ local function ClickButton(btn)
     local clicked = false
 
     if type(getconnections) == "function" then
-        -- Ưu tiên theo thứ tự: MouseButton1Click -> Activated -> MouseButton1Down
-        -- Nếu tìm thấy và kích hoạt thành công một loại sự kiện, dừng lại để tránh double-toggle (bật rồi tắt ngay)
-        local eventNames = {"MouseButton1Click", "Activated", "MouseButton1Down"}
-        for _, evtName in ipairs(eventNames) do
-            local conns = getconnections(btn[evtName])
-            if conns and #conns > 0 then
-                for _, c in ipairs(conns) do
-                    if c.Enabled then
-                        pcall(function() c:Fire() end)
-                        clicked = true
-                    end
-                end
-                if clicked then break end
+        local clickConns = getconnections(btn.MouseButton1Click)
+        local downConns = getconnections(btn.MouseButton1Down)
+        local actConns = getconnections(btn.Activated)
+
+        -- 1. Kích hoạt MouseButton1Click (các nút Replay, Start, Create, Swap...)
+        if clickConns and #clickConns > 0 then
+            for _, c in ipairs(clickConns) do
+                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
+            end
+        end
+
+        -- 2. Kích hoạt MouseButton1Down (nơi chứa code mở menu chính của Dungeon Quest: playButton, inventoryButton...)
+        if downConns and #downConns > 0 then
+            for _, c in ipairs(downConns) do
+                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
+            end
+        end
+
+        -- 3. Fallback sang Activated nếu không có 2 sự kiện trên
+        if not clicked and actConns and #actConns > 0 then
+            for _, c in ipairs(actConns) do
+                if c.Enabled then pcall(function() c:Fire() end) clicked = true end
             end
         end
     end
 
+    -- CHỈ fallback sang firesignal nếu getconnections không tìm thấy bất kỳ listener nào (chống double-toggle)
     if not clicked and typeof(firesignal) == "function" then
         pcall(function() firesignal(btn.MouseButton1Click) end)
-        pcall(function() firesignal(btn.Activated) end)
         pcall(function() firesignal(btn.MouseButton1Down) end)
         clicked = true
     end
